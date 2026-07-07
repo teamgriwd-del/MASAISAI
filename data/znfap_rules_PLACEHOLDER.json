@@ -1,0 +1,8 @@
+{
+  "_disclosure": "ILLUSTRATIVE PLACEHOLDER. This file structurally represents how POTRAZ's real Zimbabwe National Frequency Allocation Plan (ZNFAP) channel-by-channel protection list and geographic exclusion zones would be loaded into the constraint engine. The specific channel IDs and node IDs below are NOT real POTRAZ-issued assignments -- POTRAZ has not published a machine-readable per-channel occupancy/protection table to this team. Before any real deployment, this file must be replaced with data supplied or approved by POTRAZ under the regulatory sandbox arrangement described in the proposal (Section 6).",
+  "protected_channels": ["CH25", "CH26", "CH27"],
+  "excluded_nodes": [],
+  "exclusion_zone_notes": "Real deployment must additionally encode geolocation exclusion radii around active broadcast transmitters, aviation and emergency-services sites, sourced from POTRAZ. Not modelled in this simulation because no such site-coordinate dataset has been provided to the team.",
+  "source": "PLACEHOLDER -- pending POTRAZ-supplied ZNFAP machine-readable extract",
+  "version": "0.1-simulated"
+}

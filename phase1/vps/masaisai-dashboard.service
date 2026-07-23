@@ -1,0 +1,16 @@
+[Unit]
+Description=MASAISAI live Streamlit dashboard
+After=network-online.target mysql.service mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/masaisai
+EnvironmentFile=/opt/masaisai/.env
+ExecStart=/opt/masaisai/venv/bin/python -m streamlit run /opt/masaisai/live_dashboard.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

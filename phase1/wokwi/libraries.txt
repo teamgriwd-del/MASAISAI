@@ -1,0 +1,4 @@
+# Wokwi Library Manager list — add these in the Wokwi "Library Manager" tab
+PubSubClient
+Adafruit GFX Library
+Adafruit SSD1306

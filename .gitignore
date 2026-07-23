@@ -6,3 +6,7 @@ __pycache__/
 data/occupancy_model.joblib
 .venv/
 venv/
+
+.pio/
+*.log
+.env

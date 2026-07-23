@@ -1,0 +1,8 @@
+pandas
+numpy
+scikit-learn
+joblib
+streamlit
+paho-mqtt>=2.0
+pymysql
+cryptography

@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "author": "Team MASAISAI",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    {
+      "type": "wokwi-ssd1306",
+      "id": "oled",
+      "top": -20,
+      "left": 280,
+      "attrs": { "i2cAddress": "0x3c" }
+    },
+    {
+      "type": "wokwi-slide-potentiometer",
+      "id": "rfpot",
+      "top": 150,
+      "left": 280,
+      "attrs": { "travelLength": "30" }
+    },
+    { "type": "wokwi-led", "id": "led_occ", "top": 60, "left": -70, "attrs": { "color": "red" } },
+    { "type": "wokwi-led", "id": "led_idle", "top": 130, "left": -70, "attrs": { "color": "green" } },
+    { "type": "wokwi-resistor", "id": "r1", "top": 75, "left": -35, "attrs": { "value": "220" } },
+    { "type": "wokwi-resistor", "id": "r2", "top": 145, "left": -35, "attrs": { "value": "220" } },
+    {
+      "type": "wokwi-text",
+      "id": "label1",
+      "top": 195,
+      "left": 270,
+      "attrs": { "text": "RF ENERGY (broadcaster TX power) - slide me!" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "oled:SDA", "esp:21", "green", [] ],
+    [ "oled:SCL", "esp:22", "yellow", [] ],
+    [ "oled:VCC", "esp:3V3", "red", [] ],
+    [ "oled:GND", "esp:GND.1", "black", [] ],
+    [ "rfpot:SIG", "esp:34", "orange", [] ],
+    [ "rfpot:VCC", "esp:3V3", "red", [] ],
+    [ "rfpot:GND", "esp:GND.1", "black", [] ],
+    [ "led_occ:A", "r1:1", "red", [] ],
+    [ "r1:2", "esp:25", "red", [] ],
+    [ "led_occ:C", "esp:GND.2", "black", [] ],
+    [ "led_idle:A", "r2:1", "green", [] ],
+    [ "r2:2", "esp:26", "green", [] ],
+    [ "led_idle:C", "esp:GND.2", "black", [] ]
+  ],
+  "dependencies": {}
+}

@@ -1,0 +1,16 @@
+[Unit]
+Description=MASAISAI MQTT ingestion + constraint engine
+After=network-online.target mosquitto.service mysql.service mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/masaisai
+EnvironmentFile=/opt/masaisai/.env
+ExecStart=/opt/masaisai/venv/bin/python /opt/masaisai/ingest_service.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

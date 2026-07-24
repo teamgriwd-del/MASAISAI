@@ -3,6 +3,8 @@ numpy
 scikit-learn
 joblib
 streamlit
+streamlit-autorefresh
+plotly
 paho-mqtt>=2.0
 pymysql
 cryptography

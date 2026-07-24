@@ -9,11 +9,13 @@ Run under systemd (masaisai-dashboard.service) on port 8501.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pandas as pd
+import plotly.graph_objects as go
 import pymysql
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 DB = dict(
     host=os.environ.get("DB_HOST", "127.0.0.1"),
@@ -24,19 +26,65 @@ DB = dict(
     charset="utf8mb4",
 )
 
-st.set_page_config(page_title="MASAISAI -- Live Spectrum Access Console", layout="wide")
-st.title("MASAISAI -- Live Spectrum Access Console (Phase 1)")
-st.caption(
-    "LIVE data: readings arrive over MQTT from sensing nodes (Wokwi-simulated "
-    "ESP32 hardware), are scored by the ML occupancy model, and pass through the "
-    "POTRAZ-rules constraint engine. The rules layer always has final veto."
-)
-
 REFRESH_SECONDS = 5
-st.markdown(
-    f"<meta http-equiv='refresh' content='{REFRESH_SECONDS}'>",
-    unsafe_allow_html=True,
-)
+
+# ---------- Palette (dark console theme; matches .streamlit/config.toml) ----------
+SURFACE = "#1a1a19"
+PAGE = "#0d0d0d"
+INK_PRIMARY = "#ffffff"
+INK_SECONDARY = "#c3c2b7"
+INK_MUTED = "#898781"
+GRID = "#2c2c2a"
+BORDER = "rgba(255,255,255,0.10)"
+GOOD = "#0ca30c"
+CRITICAL = "#d03b3b"
+
+# Fixed categorical order (never cycled) - one hue per channel slot, indexed by
+# each channel's position in the firmware's scan list (see main.cpp CHANNELS[]).
+CHANNEL_ORDER = [21, 23, 27, 31, 36, 40]
+CATEGORICAL = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300"]
+
+
+def channel_color(channel: str) -> str:
+    try:
+        n = int(str(channel).replace("CH", ""))
+        idx = CHANNEL_ORDER.index(n)
+    except ValueError:
+        idx = 0
+    return CATEGORICAL[idx % len(CATEGORICAL)]
+
+
+# Standard 8 MHz-spaced UHF DTT channel plan, CH21 = 470 MHz (matches the
+# CH21-CH40 range src/sensing_sim.py trains the occupancy model on).
+def channel_to_freq_mhz(channel: str) -> float:
+    try:
+        n = int(str(channel).replace("CH", ""))
+    except ValueError:
+        return float("nan")
+    return 470.0 + (n - 21) * 8.0
+
+
+# Signal-strength tiers for display only (separate from the -75 dBm
+# occupancy-decision threshold used by the constraint engine).
+def rssi_quality(rssi: float) -> str:
+    if rssi >= -50:
+        return "Excellent"
+    if rssi >= -65:
+        return "Good"
+    if rssi >= -75:
+        return "Fair"
+    if rssi >= -90:
+        return "Poor"
+    return "Very poor"
+
+
+QUALITY_BARS = {
+    "Excellent": "▰▰▰▰▰",
+    "Good": "▰▰▰▰▱",
+    "Fair": "▰▰▰▱▱",
+    "Poor": "▰▰▱▱▱",
+    "Very poor": "▰▱▱▱▱",
+}
 
 
 def q(sql: str, params=None) -> pd.DataFrame:
@@ -47,53 +95,272 @@ def q(sql: str, params=None) -> pd.DataFrame:
         conn.close()
 
 
-readings = q(
-    "SELECT * FROM sensing_readings ORDER BY id DESC LIMIT 500"
+st.set_page_config(
+    page_title="MASAISAI -- Live Spectrum Access Console",
+    layout="wide",
+    initial_sidebar_state="collapsed",
 )
-decisions = q(
-    "SELECT * FROM access_decisions ORDER BY id DESC LIMIT 500"
+
+st.markdown(
+    f"""
+    <style>
+    html, body, [class*="css"] {{
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }}
+    #MainMenu, footer, header {{ visibility: hidden; }}
+    .block-container {{ padding-top: 1.6rem; max-width: 1280px; }}
+
+    .masaisai-header {{
+        display: flex; align-items: baseline; justify-content: space-between;
+        gap: 1rem; flex-wrap: wrap; margin-bottom: 0.1rem;
+    }}
+    .masaisai-title {{ font-size: 1.6rem; font-weight: 700; color: {INK_PRIMARY}; }}
+    .live-pill {{
+        display: inline-flex; align-items: center; gap: 0.4rem;
+        font-size: 0.78rem; font-weight: 600; color: {GOOD};
+        background: rgba(12,163,12,0.12); border: 1px solid rgba(12,163,12,0.35);
+        border-radius: 999px; padding: 0.22rem 0.7rem;
+    }}
+    .live-dot {{
+        width: 7px; height: 7px; border-radius: 50%; background: {GOOD};
+        box-shadow: 0 0 0 0 rgba(12,163,12,0.6);
+        animation: pulse 2s infinite;
+    }}
+    @keyframes pulse {{
+        0% {{ box-shadow: 0 0 0 0 rgba(12,163,12,0.55); }}
+        70% {{ box-shadow: 0 0 0 6px rgba(12,163,12,0); }}
+        100% {{ box-shadow: 0 0 0 0 rgba(12,163,12,0); }}
+    }}
+    .masaisai-sub {{ color: {INK_SECONDARY}; font-size: 0.92rem; margin-bottom: 1.4rem; }}
+
+    div[data-testid="stMetric"] {{
+        background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 10px;
+        padding: 0.85rem 1rem 0.7rem 1rem;
+    }}
+    div[data-testid="stMetricLabel"] {{ color: {INK_MUTED}; font-size: 0.78rem; }}
+    div[data-testid="stMetricValue"] {{ color: {INK_PRIMARY}; }}
+
+    .section-label {{
+        color: {INK_MUTED}; font-size: 0.78rem; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.04em;
+        margin: 1.6rem 0 0.5rem 0;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
+
+st_autorefresh(interval=REFRESH_SECONDS * 1000, key="datarefresh")
+
+st.markdown(
+    f"""
+    <div class="masaisai-header">
+      <div class="masaisai-title">MASAISAI &mdash; Live Spectrum Access Console</div>
+      <div class="live-pill"><span class="live-dot"></span>LIVE &middot; refreshing every {REFRESH_SECONDS}s</div>
+    </div>
+    <div class="masaisai-sub">
+      Real readings arrive over MQTT from sensing nodes, are scored by the ML occupancy
+      model, and pass through the POTRAZ-rules constraint engine &mdash; the rules layer
+      always has final veto.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+readings = q("SELECT * FROM sensing_readings ORDER BY id DESC LIMIT 500")
+decisions = q("SELECT * FROM access_decisions ORDER BY id DESC LIMIT 500")
 
 if readings.empty:
     st.info("Waiting for the first sensing reading... start the Wokwi node simulation.")
     st.stop()
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Sensing nodes (live)", readings["node_id"].nunique())
-col2.metric("Channels monitored", readings["channel"].nunique())
-col3.metric("Readings stored", len(readings))
 last_ts = pd.to_datetime(readings["timestamp"].iloc[0])
 age = (datetime.utcnow() - last_ts).total_seconds()
-col4.metric("Last reading", f"{age:.0f}s ago")
-
-st.subheader("Latest reading per node/channel")
-latest = readings.sort_values("id").groupby(["node_id", "channel"]).tail(1)
-latest_dec = decisions.sort_values("id").groupby(["node_id", "channel"]).tail(1)
-merged = latest.merge(
-    latest_dec[["node_id", "channel", "granted", "reason", "ml_probability"]],
-    on=["node_id", "channel"], how="left",
-)
-merged["decision"] = merged["granted"].map({1: "GRANT", 0: "DENY"})
-st.dataframe(
-    merged[["node_id", "channel", "timestamp", "rssi_dbm", "occupied",
-            "sensing_confidence", "ml_probability", "decision", "reason"]],
-    width="stretch",
-)
-
 grants = int((decisions["granted"] == 1).sum())
 denies = int((decisions["granted"] == 0).sum())
-st.subheader(f"Decisions (last 500): {grants} granted / {denies} denied")
 
-st.subheader("RSSI over time (live incumbent detection)")
-chart_df = readings.sort_values("id").copy()
-chart_df["timestamp"] = pd.to_datetime(chart_df["timestamp"])
-for (node, ch), g in chart_df.groupby(["node_id", "channel"]):
-    st.line_chart(g.set_index("timestamp")["rssi_dbm"], height=200)
-    st.caption(f"{node} / {ch} -- energy above -75 dBm = incumbent broadcaster active")
+c1, c2, c3, c4, c5, c6 = st.columns(6)
+c1.metric("Sensing nodes", readings["node_id"].nunique())
+c2.metric("Channels scanned", readings["channel"].nunique())
+c3.metric("Readings stored", len(readings))
+c4.metric("Last reading", f"{age:.0f}s ago")
+c5.metric("Granted", grants)
+c6.metric("Denied", denies)
+
+
+def channel_sort_key(ch):
+    n = str(ch).replace("CH", "")
+    return CHANNEL_ORDER.index(int(n)) if n.isdigit() and int(n) in CHANNEL_ORDER else 99
+
+
+def latest_per(df: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+    return df.sort_values("id").groupby(keys).tail(1)
+
+
+def with_decision(df: pd.DataFrame, dec: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+    dec_latest = latest_per(dec, keys)
+    out = df.merge(
+        dec_latest[keys + ["granted", "reason", "ml_probability"]], on=keys, how="left"
+    )
+    out["decision"] = out["granted"].map({1: "\U0001f7e2 GRANT", 0: "\U0001f534 DENY"})
+    out["freq_mhz"] = out["channel"].map(channel_to_freq_mhz)
+    out["signal"] = out["rssi_dbm"].map(rssi_quality)
+    out["signal_bar"] = out["signal"].map(QUALITY_BARS) + "  " + out["signal"]
+    return out
+
+
+# ---------- Node focus selector ----------
+st.markdown('<div class="section-label">Focus</div>', unsafe_allow_html=True)
+node_list = sorted(readings["node_id"].unique())
+sel_col, _ = st.columns([1, 3])
+focus = sel_col.selectbox("Focus", ["All nodes"] + node_list, label_visibility="collapsed")
+
+if focus == "All nodes":
+    # ---------- Network overview: one row per node ----------
+    st.markdown('<div class="section-label">All nodes &mdash; latest status</div>', unsafe_allow_html=True)
+    st.caption("Pick a node above to drill into its own channel-by-channel view and RSSI history.")
+
+    overview = with_decision(latest_per(readings, ["node_id"]), decisions, ["node_id", "channel"])
+    overview = overview.sort_values("node_id")
+
+    st.dataframe(
+        overview[["node_id", "channel", "freq_mhz", "rssi_dbm", "signal_bar",
+                  "sensing_confidence", "decision", "timestamp"]],
+        column_config={
+            "node_id": "Node",
+            "channel": "Active channel",
+            "freq_mhz": st.column_config.NumberColumn("Frequency", format="%.0f MHz"),
+            "rssi_dbm": st.column_config.NumberColumn("RSSI", format="%.1f dBm"),
+            "signal_bar": "Signal",
+            "sensing_confidence": st.column_config.ProgressColumn(
+                "Sensing confidence", min_value=0.0, max_value=1.0, format="%.2f"
+            ),
+            "decision": "Decision",
+            "timestamp": st.column_config.DatetimeColumn("Last seen", format="HH:mm:ss"),
+        },
+        hide_index=True,
+        width="stretch",
+    )
+
+    st.markdown('<div class="section-label">RSSI by node, latest reading</div>', unsafe_allow_html=True)
+    bar_colors = [GOOD if g == 1 else CRITICAL for g in overview["granted"].fillna(0)]
+    bar_fig = go.Figure(go.Bar(
+        x=overview["node_id"], y=overview["rssi_dbm"],
+        marker_color=bar_colors,
+        text=overview["decision"], textposition="outside",
+        hovertemplate="%{x}<br>%{y:.1f} dBm<extra></extra>",
+    ))
+    bar_fig.add_hline(
+        y=-75, line=dict(color=INK_MUTED, width=1, dash="dot"),
+        annotation_text="occupancy threshold  -75 dBm",
+        annotation_position="top left",
+        annotation=dict(font=dict(color=INK_MUTED, size=11)),
+    )
+    bar_fig.update_layout(
+        height=320,
+        margin=dict(l=10, r=10, t=30, b=10),
+        paper_bgcolor=SURFACE, plot_bgcolor=SURFACE,
+        font=dict(color=INK_SECONDARY, family="system-ui, -apple-system, Segoe UI, sans-serif"),
+        showlegend=False,
+        xaxis=dict(showgrid=False, color=INK_MUTED, linecolor=GRID),
+        yaxis=dict(title="RSSI (dBm)", showgrid=True, gridcolor=GRID, gridwidth=1,
+                   zeroline=False, color=INK_MUTED),
+    )
+    st.plotly_chart(bar_fig, width="stretch", config={"displayModeBar": False})
+    st.caption(
+        "Green = GRANT (verified idle), red = DENY (incumbent detected). "
+        "Bar height is each node's most recent RSSI reading, on whichever channel it "
+        "was scanning last."
+    )
+
+    audit_scope = decisions.copy()
+else:
+    # ---------- Single-node detail ----------
+    node_readings = readings[readings["node_id"] == focus]
+    node_decisions = decisions[decisions["node_id"] == focus]
+
+    st.markdown(f'<div class="section-label">{focus} &mdash; latest reading per channel</div>', unsafe_allow_html=True)
+    merged = with_decision(latest_per(node_readings, ["node_id", "channel"]), node_decisions, ["node_id", "channel"])
+    merged = merged.sort_values("channel", key=lambda s: s.map(channel_sort_key))
+
+    st.dataframe(
+        merged[["channel", "freq_mhz", "rssi_dbm", "signal_bar",
+                "sensing_confidence", "ml_probability", "decision", "timestamp"]],
+        column_config={
+            "channel": "Channel",
+            "freq_mhz": st.column_config.NumberColumn("Frequency", format="%.0f MHz"),
+            "rssi_dbm": st.column_config.NumberColumn("RSSI", format="%.1f dBm"),
+            "signal_bar": "Signal",
+            "sensing_confidence": st.column_config.ProgressColumn(
+                "Sensing confidence", min_value=0.0, max_value=1.0, format="%.2f"
+            ),
+            "ml_probability": st.column_config.ProgressColumn(
+                "P(occupied, next 15m)", min_value=0.0, max_value=1.0, format="%.2f"
+            ),
+            "decision": "Decision",
+            "timestamp": st.column_config.DatetimeColumn("Last seen", format="HH:mm:ss"),
+        },
+        hide_index=True,
+        width="stretch",
+    )
+
+    st.markdown(f'<div class="section-label">{focus} &mdash; RSSI over time, all channels</div>', unsafe_allow_html=True)
+    st.caption(
+        "Watch a line cross the dotted **-75 dBm** threshold: crossing **up** means the "
+        "constraint engine sees the incumbent broadcaster active and flips that channel's "
+        "decision to **DENY**; crossing **down** means the channel is verified idle and "
+        "eligible for **GRANT**. The table above updates within a few seconds of each crossing."
+    )
+    chart_df = node_readings.sort_values("id").copy()
+    chart_df["timestamp"] = pd.to_datetime(chart_df["timestamp"])
+
+    fig = go.Figure()
+    for ch in sorted(chart_df["channel"].unique(), key=channel_sort_key):
+        g = chart_df[chart_df["channel"] == ch]
+        freq = channel_to_freq_mhz(ch)
+        fig.add_trace(go.Scatter(
+            x=g["timestamp"], y=g["rssi_dbm"],
+            mode="lines",
+            name=f"{ch} ({freq:.0f} MHz)",
+            line=dict(width=2, color=channel_color(ch), shape="linear"),
+            hovertemplate="%{y:.1f} dBm<br>%{x|%H:%M:%S}<extra>" + str(ch) + "</extra>",
+        ))
+
+    fig.add_hline(
+        y=-75, line=dict(color=INK_MUTED, width=1, dash="dot"),
+        annotation_text="occupancy threshold  -75 dBm",
+        annotation_position="top left",
+        annotation=dict(font=dict(color=INK_MUTED, size=11)),
+    )
+
+    fig.update_layout(
+        height=340,
+        margin=dict(l=10, r=10, t=10, b=10),
+        paper_bgcolor=SURFACE,
+        plot_bgcolor=SURFACE,
+        font=dict(color=INK_SECONDARY, family="system-ui, -apple-system, Segoe UI, sans-serif"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                    bgcolor="rgba(0,0,0,0)"),
+        xaxis=dict(showgrid=False, color=INK_MUTED, linecolor=GRID),
+        yaxis=dict(title="RSSI (dBm)", showgrid=True, gridcolor=GRID, gridwidth=1,
+                   zeroline=False, color=INK_MUTED),
+        hovermode="closest",
+    )
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+    st.caption("Energy above -75 dBm indicates the incumbent broadcaster is active on that channel.")
+
+    audit_scope = node_decisions
 
 with st.expander("Full audit log (every decision, fully explained)"):
+    audit = audit_scope.copy()
+    audit["freq_mhz"] = audit["channel"].map(channel_to_freq_mhz)
+    audit["decision"] = audit["granted"].map({1: "\U0001f7e2 GRANT", 0: "\U0001f534 DENY"})
     st.dataframe(
-        decisions[["timestamp", "node_id", "channel", "granted", "reason",
-                   "ml_probability", "sensing_confidence", "expires_at"]],
+        audit[["timestamp", "node_id", "channel", "freq_mhz", "decision", "reason",
+               "ml_probability", "sensing_confidence", "expires_at"]],
+        column_config={
+            "freq_mhz": st.column_config.NumberColumn("Frequency", format="%.0f MHz"),
+        },
+        hide_index=True,
         width="stretch",
     )

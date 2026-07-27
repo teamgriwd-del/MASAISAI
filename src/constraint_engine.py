@@ -1,22 +1,21 @@
 """
 POTRAZ-rules constraint engine for MASAISAI.
 
-Core safety architecture: rules always override the ML model. The ML
-occupancy predictor (occupancy_model.py) never gets the final word on
-whether a channel is opened -- it only ever supplies one input to a
-decision that a hard-coded, auditable rules layer can veto. This mirrors
-the incumbent-protection guarantee the FCC/Ofcom TV white space database
-model already relies on (see proposal Section 5), implemented so it holds
+Core safety architecture: rules always override the ML model. The ML fusion model
+(occupancy_model.py) never gets the final word on whether a channel is verified idle -- it
+only ever supplies one input to a classification that a hard-coded, auditable rules layer can
+override. This mirrors the incumbent-protection guarantee the FCC/Ofcom TV white space
+database model already relies on (see proposal Section 5), implemented so it holds
 regardless of what the ML layer predicts.
 
 Decision order (see decide_access):
   1. Rules layer: is this channel in the protected/incumbent list, or is
-     this node inside an exclusion zone? -> deny, unconditionally.
+     this node inside an exclusion zone? -> flagged, unconditionally.
   2. Fail-safe: is sensing confidence for this reading below threshold
-     (node degraded/offline)? -> deny, regardless of ML prediction.
-  3. ML layer: is predicted occupancy probability for the next window
-     above the grant threshold? -> deny.
-  4. Otherwise -> grant, for a bounded time window, fully logged.
+     (node degraded/offline)? -> flagged, regardless of ML prediction.
+  3. ML layer: is the fused occupancy probability above the
+     verified-idle threshold? -> flagged.
+  4. Otherwise -> verified idle, for a bounded time window, fully logged.
 
 `rules` are loaded from data/znfap_rules_PLACEHOLDER.json -- explicitly
 named and documented as an illustrative structure, NOT POTRAZ's real
@@ -86,17 +85,17 @@ def decide_access(
     # 1. Rules layer -- absolute veto, checked first, ML is never consulted
     # for a protected channel.
     if channel in rules.get("protected_channels", []):
-        return Decision(node_id, channel, False, "DENIED: channel is on the protected/incumbent list",
+        return Decision(node_id, channel, False, "FLAGGED: channel is on the protected/incumbent list",
                          sensing_confidence=sensing_confidence)
 
     if node_id in rules.get("excluded_nodes", []):
-        return Decision(node_id, channel, False, "DENIED: node is within a hard exclusion zone",
+        return Decision(node_id, channel, False, "FLAGGED: node is within a hard exclusion zone",
                          sensing_confidence=sensing_confidence)
 
-    # 2. Fail-safe -- default to deny if we can't trust the sensing data.
+    # 2. Fail-safe -- default to flag for review if we can't trust the sensing data.
     if sensing_confidence < confidence_threshold:
         return Decision(node_id, channel, False,
-                         f"DENIED: sensing confidence {sensing_confidence:.2f} below "
+                         f"FLAGGED: sensing confidence {sensing_confidence:.2f} below "
                          f"fail-safe threshold {confidence_threshold:.2f}",
                          ml_probability=ml_probability, sensing_confidence=sensing_confidence)
 
@@ -104,15 +103,15 @@ def decide_access(
     # rules and sensing is trustworthy.
     if ml_probability > occupancy_grant_threshold:
         return Decision(node_id, channel, False,
-                         f"DENIED: predicted occupancy probability {ml_probability:.2f} exceeds "
-                         f"grant threshold {occupancy_grant_threshold:.2f}",
+                         f"FLAGGED: predicted occupancy probability {ml_probability:.2f} exceeds "
+                         f"verified-idle threshold {occupancy_grant_threshold:.2f}",
                          ml_probability=ml_probability, sensing_confidence=sensing_confidence)
 
-    # 4. Grant, bounded and logged.
+    # 4. Verified idle, bounded and logged.
     expires_at = (datetime.now(UTC) + timedelta(minutes=grant_window_minutes)).isoformat()
     return Decision(node_id, channel, True,
-                     f"GRANTED: verified idle (p_occupied={ml_probability:.2f}), "
-                     f"confidence {sensing_confidence:.2f}, window {grant_window_minutes} min",
+                     f"VERIFIED IDLE (p_occupied={ml_probability:.2f}), "
+                     f"confidence {sensing_confidence:.2f}, valid {grant_window_minutes} min",
                      ml_probability=ml_probability, sensing_confidence=sensing_confidence,
                      expires_at=expires_at)
 
@@ -120,10 +119,10 @@ def decide_access(
 if __name__ == "__main__":
     rules = load_rules()
     examples = [
-        ("NODE1", "CH21", 0.10, 0.92),  # expect grant
-        ("NODE1", "CH25", 0.05, 0.92),  # protected channel -> deny regardless
-        ("NODE3", "CH30", 0.05, 0.40),  # low confidence -> fail-safe deny
-        ("NODE2", "CH33", 0.80, 0.92),  # predicted occupied -> deny
+        ("NODE1", "CH21", 0.10, 0.92),  # expect verified idle
+        ("NODE1", "CH25", 0.05, 0.92),  # protected channel -> flagged regardless
+        ("NODE3", "CH30", 0.05, 0.40),  # low confidence -> fail-safe flag
+        ("NODE2", "CH33", 0.80, 0.92),  # predicted occupied -> flagged
     ]
     for node_id, channel, p, conf in examples:
         d = decide_access(node_id, channel, p, conf, rules)

@@ -32,7 +32,7 @@ import pymysql
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from constraint_engine import decide_access, load_rules  # noqa: E402
 from occupancy_model import FEATURE_COLUMNS, add_features, train_model  # noqa: E402
-from sensing_sim import generate_dataset  # noqa: E402
+from sensing_sim import _NODE_ATTENUATION_DB, generate_dataset  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("masaisai-ingest")
@@ -61,6 +61,21 @@ _NODE_CODE = {n: i for i, n in enumerate(_NODES)}
 RULES = load_rules()
 log.info("Model trained. %d channels, %d nodes in code maps.", len(_CHANNELS), len(_NODES))
 
+# Real Phase-1 field/Wokwi node IDs (e.g. "wokwi-node-01") never appear in
+# the synthetic training set, which only knows NODE1..NODE8 -- without this
+# map every real node silently fell back to node_code 0 via .get(id, 0),
+# i.e. every physical node was scored by the model as if it were NODE1
+# regardless of its actual position. node_code is really a proxy for a
+# node's path-loss/attenuation from the broadcaster, not its label, so map
+# each real node to whichever trained node has the closest attenuation
+# (mirrors main.cpp's NODE_ATTEN_DB: 0,2,4,...,18 dB for nodes 01..10).
+_FIELD_NODE_ATTEN_DB = {f"wokwi-node-{i:02d}": atten
+                         for i, atten in zip(range(1, 11), range(0, 20, 2))}
+_FIELD_NODE_CODE = {
+    field_id: _NODE_CODE[min(_NODE_ATTENUATION_DB, key=lambda n: abs(_NODE_ATTENUATION_DB[n] - atten))]
+    for field_id, atten in _FIELD_NODE_ATTEN_DB.items()
+}
+
 # Per (node, channel) history of previous occupied flags (for rolling rate)
 _history: dict[tuple, deque] = defaultdict(lambda: deque(maxlen=3))
 
@@ -84,7 +99,7 @@ def ml_probability(node_id: str, channel: str, rssi: float, occupied: int) -> fl
         "occupied": occupied,
         "rolling_occupancy_rate": rolling,
         "channel_code": _CHANNEL_CODE.get(channel, 0),
-        "node_code": _NODE_CODE.get(node_id, 0),
+        "node_code": _FIELD_NODE_CODE.get(node_id, _NODE_CODE.get(node_id, 0)),
     }])
     return float(MODEL.predict_proba(row[FEATURE_COLUMNS])[:, 1][0])
 

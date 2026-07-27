@@ -34,7 +34,14 @@ from pathlib import Path
 RULES_PATH = Path(__file__).resolve().parent.parent / "data" / "znfap_rules_PLACEHOLDER.json"
 
 DEFAULT_CONFIDENCE_THRESHOLD = 0.6
-DEFAULT_OCCUPANCY_GRANT_THRESHOLD = 0.35  # deny if predicted occupancy prob exceeds this
+# Deny if predicted occupancy prob exceeds this. Calibrated against the
+# trained model's own output distribution (see occupancy_model training
+# probe, 2026-07-27): genuinely-idle readings score ~0.36-0.43, genuinely-
+# occupied readings score ~0.72-0.78 -- 0.5 sits in the clear gap between
+# the two clusters ("grant only if more likely idle than occupied"). The
+# previous 0.35 sat *below* the idle cluster's own floor, so a live idle
+# reading could almost never clear it.
+DEFAULT_OCCUPANCY_GRANT_THRESHOLD = 0.5
 DEFAULT_GRANT_WINDOW_MINUTES = 15
 
 

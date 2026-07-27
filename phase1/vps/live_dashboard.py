@@ -12,6 +12,13 @@ real node (unchanged) for full dataset transparency; only decisions moved to cha
 granularity.
 
 Run under systemd (masaisai-dashboard.service) on port 8501.
+
+Visual design pass 28 Jul 2026 (ui-ux-pro-max skill): moved from a soft "product" look toward
+a denser, monospace-forward engineering-console treatment -- the audience for this specific
+surface is hands-on technical judges/engineers, not a general pitch audience, so information
+density and technical precision read as more credible here than generous whitespace does.
+Brand (navy/teal) matched to the pitch deck and the synthetic dashboard_app.py for
+cross-artifact consistency. Purely visual -- no query or data-flow changes.
 """
 
 from __future__ import annotations
@@ -36,16 +43,18 @@ DB = dict(
 
 REFRESH_SECONDS = 5
 
-# ---------- Palette (dark console theme; matches .streamlit/config.toml) ----------
-SURFACE = "#1a1a19"
-PAGE = "#0d0d0d"
-INK_PRIMARY = "#ffffff"
-INK_SECONDARY = "#c3c2b7"
-INK_MUTED = "#898781"
-GRID = "#2c2c2a"
-BORDER = "rgba(255,255,255,0.10)"
-GOOD = "#0ca30c"
-CRITICAL = "#d03b3b"
+# ---------- Palette (dark engineering-console theme; navy/teal brand match with the pitch
+# deck and src/dashboard_app.py) ----------
+PAGE = "#060D1A"
+SURFACE = "#0D1B30"
+INK_PRIMARY = "#F1F5F9"
+INK_SECONDARY = "#C7D2E1"
+INK_MUTED = "#8695AC"
+GRID = "rgba(255,255,255,0.07)"
+BORDER = "rgba(46,196,182,0.16)"
+TEAL = "#2EC4B6"
+GOOD = "#22C55E"
+CRITICAL = "#F59E0B"
 
 # Fixed categorical order (never cycled) - one hue per channel slot, indexed by
 # each channel's position in the firmware's scan list (see main.cpp CHANNELS[]).
@@ -112,47 +121,84 @@ st.set_page_config(
 st.markdown(
     f"""
     <style>
-    html, body, [class*="css"] {{
-        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+    html, body, [class*="css"] {{ font-family: 'IBM Plex Sans', system-ui, sans-serif; }}
+    .stApp {{
+        background:
+            repeating-linear-gradient(0deg, rgba(46,196,182,0.025) 0px, rgba(46,196,182,0.025) 1px, transparent 1px, transparent 32px),
+            {PAGE};
     }}
     #MainMenu, footer, header {{ visibility: hidden; }}
-    .block-container {{ padding-top: 1.6rem; max-width: 1280px; }}
+    .block-container {{ padding-top: 1.1rem; padding-bottom: 1rem; max-width: 1360px; }}
+    p, span, div, label {{ color: {INK_SECONDARY}; }}
 
     .masaisai-header {{
-        display: flex; align-items: baseline; justify-content: space-between;
-        gap: 1rem; flex-wrap: wrap; margin-bottom: 0.1rem;
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 1rem; flex-wrap: wrap; margin-bottom: 0.15rem;
+        border-bottom: 1px solid {BORDER}; padding-bottom: 0.7rem;
     }}
-    .masaisai-title {{ font-size: 1.6rem; font-weight: 700; color: {INK_PRIMARY}; }}
+    .masaisai-title {{
+        font-size: 1.35rem; font-weight: 700; color: {INK_PRIMARY};
+        letter-spacing: -0.01em;
+    }}
+    .masaisai-title .accent {{ color: {TEAL}; }}
     .live-pill {{
-        display: inline-flex; align-items: center; gap: 0.4rem;
-        font-size: 0.78rem; font-weight: 600; color: {GOOD};
-        background: rgba(12,163,12,0.12); border: 1px solid rgba(12,163,12,0.35);
-        border-radius: 999px; padding: 0.22rem 0.7rem;
+        display: inline-flex; align-items: center; gap: 0.45rem;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 0.7rem; font-weight: 600; color: {GOOD};
+        background: rgba(34,197,94,0.10); border: 1px solid rgba(34,197,94,0.35);
+        border-radius: 4px; padding: 0.28rem 0.65rem; text-transform: uppercase;
+        letter-spacing: 0.05em;
     }}
     .live-dot {{
-        width: 7px; height: 7px; border-radius: 50%; background: {GOOD};
-        box-shadow: 0 0 0 0 rgba(12,163,12,0.6);
+        width: 6px; height: 6px; border-radius: 50%; background: {GOOD};
+        box-shadow: 0 0 0 0 rgba(34,197,94,0.6);
         animation: pulse 2s infinite;
     }}
     @keyframes pulse {{
-        0% {{ box-shadow: 0 0 0 0 rgba(12,163,12,0.55); }}
-        70% {{ box-shadow: 0 0 0 6px rgba(12,163,12,0); }}
-        100% {{ box-shadow: 0 0 0 0 rgba(12,163,12,0); }}
+        0% {{ box-shadow: 0 0 0 0 rgba(34,197,94,0.55); }}
+        70% {{ box-shadow: 0 0 0 6px rgba(34,197,94,0); }}
+        100% {{ box-shadow: 0 0 0 0 rgba(34,197,94,0); }}
     }}
-    .masaisai-sub {{ color: {INK_SECONDARY}; font-size: 0.92rem; margin-bottom: 1.4rem; }}
+    .masaisai-sub {{
+        color: {INK_MUTED}; font-size: 0.85rem; line-height: 1.5;
+        margin: 0.6rem 0 1.1rem 0; max-width: 980px;
+    }}
 
     div[data-testid="stMetric"] {{
-        background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 10px;
-        padding: 0.85rem 1rem 0.7rem 1rem;
+        background: {SURFACE}; border: 1px solid {BORDER} !important; border-radius: 6px;
+        padding: 0.6rem 0.8rem 0.5rem 0.8rem;
     }}
-    div[data-testid="stMetricLabel"] {{ color: {INK_MUTED}; font-size: 0.78rem; }}
-    div[data-testid="stMetricValue"] {{ color: {INK_PRIMARY}; }}
+    div[data-testid="stMetricLabel"] {{
+        color: {INK_MUTED}; font-size: 0.68rem; text-transform: uppercase;
+        letter-spacing: 0.05em; font-family: 'IBM Plex Mono', monospace;
+    }}
+    div[data-testid="stMetricValue"] {{
+        color: {INK_PRIMARY}; font-family: 'IBM Plex Mono', monospace; font-size: 1.35rem;
+    }}
 
     .section-label {{
-        color: {INK_MUTED}; font-size: 0.78rem; font-weight: 600;
-        text-transform: uppercase; letter-spacing: 0.04em;
-        margin: 1.6rem 0 0.5rem 0;
+        color: {TEAL}; font-size: 0.72rem; font-weight: 600;
+        font-family: 'IBM Plex Mono', monospace;
+        text-transform: uppercase; letter-spacing: 0.06em;
+        margin: 1.3rem 0 0.5rem 0;
     }}
+    .section-label::before {{ content: "[ "; color: {INK_MUTED}; }}
+    .section-label::after {{ content: " ]"; color: {INK_MUTED}; }}
+
+    div[data-testid="stDataFrame"] {{
+        border: 1px solid {BORDER}; border-radius: 6px; overflow: hidden;
+        font-family: 'IBM Plex Mono', monospace;
+    }}
+    div[data-testid="stExpander"] {{
+        background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 6px;
+    }}
+    div[data-testid="stExpander"] summary {{
+        font-family: 'IBM Plex Mono', monospace; color: {INK_PRIMARY}; font-size: 0.85rem;
+    }}
+    div[data-baseweb="select"] {{ font-family: 'IBM Plex Mono', monospace; }}
+    .stCaption, [data-testid="stCaptionContainer"] {{ color: {INK_MUTED} !important; font-size: 0.8rem; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -163,8 +209,8 @@ st_autorefresh(interval=REFRESH_SECONDS * 1000, key="datarefresh")
 st.markdown(
     f"""
     <div class="masaisai-header">
-      <div class="masaisai-title">MASAISAI &mdash; Live Spectrum Idle-Verification Console</div>
-      <div class="live-pill"><span class="live-dot"></span>LIVE &middot; refreshing every {REFRESH_SECONDS}s</div>
+      <div class="masaisai-title">MASAISAI <span class="accent">//</span> Live Spectrum Idle-Verification Console</div>
+      <div class="live-pill"><span class="live-dot"></span>Live &middot; refresh {REFRESH_SECONDS}s</div>
     </div>
     <div class="masaisai-sub">
       Real readings arrive over MQTT from sensing nodes; every node currently reporting on a
@@ -213,19 +259,23 @@ verified = int((latest_decisions["granted"] == 1).sum())
 flagged = int((latest_decisions["granted"] == 0).sum())
 
 c1, c2, c3, c4, c5, c6 = st.columns(6)
-c1.metric("Sensing nodes", readings["node_id"].nunique())
-c2.metric("Channels scanned", readings["channel"].nunique())
-c3.metric("Readings stored", len(readings))
-c4.metric("Last reading", f"{age:.0f}s ago")
-c5.metric("Verified idle", verified)
-c6.metric("Flagged", flagged)
+c1.metric("Sensing nodes", readings["node_id"].nunique(), border=True)
+c2.metric("Channels scanned", readings["channel"].nunique(), border=True)
+c3.metric("Readings stored", len(readings), border=True)
+c4.metric("Last reading", f"{age:.0f}s ago", border=True)
+c5.metric("Verified idle", verified, border=True)
+c6.metric("Flagged", flagged, border=True)
 
 
 # ---------- Node focus selector ----------
 st.markdown('<div class="section-label">Focus</div>', unsafe_allow_html=True)
 node_list = sorted(readings["node_id"].unique())
-sel_col, _ = st.columns([1, 3])
-focus = sel_col.selectbox("Focus", ["All nodes"] + node_list, label_visibility="collapsed")
+focus = st.pills(
+    "Focus", ["All nodes"] + node_list, default="All nodes",
+    selection_mode="single", label_visibility="collapsed",
+)
+if focus is None:
+    focus = "All nodes"
 
 if focus == "All nodes":
     # ---------- Network overview: one row per node ----------
@@ -272,7 +322,7 @@ if focus == "All nodes":
         height=320,
         margin=dict(l=10, r=10, t=30, b=10),
         paper_bgcolor=SURFACE, plot_bgcolor=SURFACE,
-        font=dict(color=INK_SECONDARY, family="system-ui, -apple-system, Segoe UI, sans-serif"),
+        font=dict(color=INK_SECONDARY, family="IBM Plex Mono, monospace"),
         showlegend=False,
         xaxis=dict(showgrid=False, color=INK_MUTED, linecolor=GRID),
         yaxis=dict(title="RSSI (dBm)", showgrid=True, gridcolor=GRID, gridwidth=1,
@@ -358,7 +408,7 @@ else:
         margin=dict(l=10, r=10, t=10, b=10),
         paper_bgcolor=SURFACE,
         plot_bgcolor=SURFACE,
-        font=dict(color=INK_SECONDARY, family="system-ui, -apple-system, Segoe UI, sans-serif"),
+        font=dict(color=INK_SECONDARY, family="IBM Plex Mono, monospace"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
                     bgcolor="rgba(0,0,0,0)"),
         xaxis=dict(showgrid=False, color=INK_MUTED, linecolor=GRID),

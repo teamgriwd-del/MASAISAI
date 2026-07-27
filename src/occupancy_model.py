@@ -1,29 +1,24 @@
 """
-ML occupancy-prediction model for MASAISAI, plus the fixed-schedule
-baseline it is benchmarked against.
+ML occupancy-verification model for MASAISAI, plus the naive-vote baseline it is
+benchmarked against.
 
-Why AI instead of a lookup table (see also Section 2/4 of the proposal):
-A static schedule table -- "channel X is normally free 00:00-04:00" -- is
-exactly the FCC/Ofcom first-generation TV white space database pattern.
-It works until reality deviates from the schedule: an unannounced
-maintenance window, a special broadcast, a temporarily silent transmitter.
-The baseline implemented here (`predict_baseline`) is that lookup table.
+Reframed 27 Jul 2026 from a next-window *forecasting* task to a multi-node sensor *fusion*
+task -- see `Pitching and Presenting/04_ANTICIPATED_QUESTIONS.md` section 1. "Forecast the
+next window" only ever existed to feed a grant/deny access decision that this project no
+longer makes; the deliverable is now proving, verifiably, that a band is idle.
 
-Important framing: predicting the *current* occupancy state from the
-*current* RSSI reading is not prediction at all -- that is ordinary energy
-detection (a simple threshold rule handles it, and the constraint engine
-already does this for real-time grant/revoke decisions). The task this
-model is built for is forecasting the *next* sensing window's occupancy
-BEFORE that window has been sensed, using only information already
-available: the current/most recent reading and the historical hour-of-day
-pattern. That is a genuinely harder problem a static table cannot solve
-in real time, because it requires noticing that the *current* trend is
-departing from the *historical* schedule.
+Why AI instead of a simple vote: a single sensor's RSSI threshold reading can be wrong on its
+own -- multipath fade, transient interference, or just standing somewhere with poor signal
+geometry (sensing_sim.py deliberately injects exactly this kind of noise). An unweighted
+majority vote across several nodes helps, but treats every node's vote equally regardless of
+how trustworthy that particular reading actually is. `predict_naive_vote_baseline` is that
+unweighted vote -- the "simple rule" this has to beat. The ML model instead learns which
+patterns of multi-node disagreement, confidence spread, and recent channel history actually
+correlate with true occupancy, producing a single, more accurate, fully auditable verdict a
+plain vote can't reach on its own.
 
-`run_comparison()` trains both on the same data and scores both on a
-held-out period that deliberately contains schedule irregularities
-(see sensing_sim.py), to give a real, reproducible number for "why AI
-was necessary" rather than an assertion.
+`run_comparison()` trains both on the same data and scores both on a held-out period, to give
+a real, reproducible number for "why AI was necessary" rather than an assertion.
 """
 
 from __future__ import annotations
@@ -37,49 +32,77 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
-# Note: rssi_dbm/occupied here refer to the CURRENT reading (t), used as
-# context to forecast occupied_next (t+1). They are not the RSSI of the
-# window being predicted -- that has not been sensed yet.
-FEATURE_COLUMNS = ["next_hour", "next_dow", "rssi_dbm", "occupied", "rolling_occupancy_rate",
-                    "channel_code", "node_code"]
-TARGET_COLUMN = "occupied_next"
+# Matches the firmware's own single-node energy-detection cutoff
+# (phase1/wokwi-vscode/src/main.cpp, OCCUPIED_THRESHOLD_DBM) -- kept identical so the naive
+# per-node vote this baseline is built from is the same simple rule a real node already runs,
+# not a strawman.
+ENERGY_DETECTION_THRESHOLD_DBM = -75.0
+
+FEATURE_COLUMNS = [
+    "hour", "dow", "channel_code",
+    "mean_rssi_dbm", "min_rssi_dbm", "max_rssi_dbm", "std_rssi_dbm",
+    "mean_confidence", "min_confidence", "max_confidence",
+    "naive_vote_frac", "confidence_weighted_vote",
+    "rolling_occupancy_rate",
+]
+TARGET_COLUMN = "occupied"
 MODEL_PATH = Path(__file__).resolve().parent.parent / "data" / "occupancy_model.joblib"
 
-# Edge deployment budget this model is designed against (see proposal
-# Section 2 / rubric C4): quantized/serialized model must stay well under
-# 256MB and single-prediction latency under 100ms on a Raspberry-Pi-class
-# edge host. Verified in tests/test_occupancy_model.py, not just claimed.
+# Edge deployment budget this model is designed against (see proposal Section 2 / rubric C4):
+# quantized/serialized model must stay well under 256MB and single-prediction latency under
+# 100ms on a Raspberry-Pi-class edge host. Verified in tests/test_occupancy_model.py, not just
+# claimed.
 MAX_MODEL_SIZE_MB = 256
 MAX_LATENCY_MS = 100
 
 
-def add_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Builds a forecasting frame: for each (node, channel) sensing series,
-    the target is next reading's occupancy; features are the CURRENT
-    reading plus history, never anything from the future window itself."""
-    df = df.sort_values(["node_id", "channel", "day_index", "hour"]).copy()
-    df["channel_code"] = df["channel"].astype("category").cat.codes
-    df["node_code"] = df["node_id"].astype("category").cat.codes
+def build_fusion_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Pivots sensing_sim's long-format rows (one per day/hour/channel/node) into one row per
+    (day_index, hour, channel), fusing that hour's per-node readings into aggregate features.
+    Target is the real, un-shifted ground-truth `occupied` for that window -- there is no
+    "next" here, this verifies the current window, using every node reporting on it."""
+    naive_flag = (df["rssi_dbm"] > ENERGY_DETECTION_THRESHOLD_DBM).astype(int)
 
-    grp = df.groupby(["node_id", "channel"], group_keys=False)
-    # Rolling occupancy rate over the previous 3 sensing readings (not
-    # including the current one) -- the "recent trend" signal a static
-    # schedule table does not have access to.
-    df["rolling_occupancy_rate"] = grp["occupied"].transform(
+    grouped = df.assign(_naive_flag=naive_flag).groupby(
+        ["day_index", "hour", "channel", "split"], as_index=False
+    ).agg(
+        dow=("dow", "first"),
+        occupied=("occupied", "first"),
+        mean_rssi_dbm=("rssi_dbm", "mean"),
+        min_rssi_dbm=("rssi_dbm", "min"),
+        max_rssi_dbm=("rssi_dbm", "max"),
+        std_rssi_dbm=("rssi_dbm", "std"),
+        mean_confidence=("sensing_confidence", "mean"),
+        min_confidence=("sensing_confidence", "min"),
+        max_confidence=("sensing_confidence", "max"),
+        naive_vote_frac=("_naive_flag", "mean"),
+        _confidence_sum=("sensing_confidence", "sum"),
+    )
+    grouped["std_rssi_dbm"] = grouped["std_rssi_dbm"].fillna(0.0)
+
+    # Confidence-weighted vote: nodes with higher sensing confidence count for more --
+    # computed separately since it needs both the flag and the confidence per row together.
+    weighted = df.assign(_naive_flag=naive_flag, _weighted=naive_flag * df["sensing_confidence"])
+    weighted_sum = weighted.groupby(["day_index", "hour", "channel", "split"], as_index=False)[
+        "_weighted"
+    ].sum()
+    grouped = grouped.merge(weighted_sum, on=["day_index", "hour", "channel", "split"])
+    grouped["confidence_weighted_vote"] = (
+        grouped["_weighted"] / grouped["_confidence_sum"].replace(0, np.nan)
+    ).fillna(0.5)
+    grouped = grouped.drop(columns=["_weighted", "_confidence_sum"])
+
+    grouped["channel_code"] = grouped["channel"].astype("category").cat.codes
+
+    grouped = grouped.sort_values(["channel", "day_index", "hour"])
+    grp = grouped.groupby("channel", group_keys=False)
+    # Rolling idle-rate over the previous 3 windows for this channel (not including the
+    # current one) -- the "recent trend" signal a one-shot reading doesn't have.
+    grouped["rolling_occupancy_rate"] = grp[TARGET_COLUMN].transform(
         lambda s: s.shift(1).rolling(3, min_periods=1).mean()
     ).fillna(0.5)
 
-    # Forecast target: the NEXT reading in this node+channel's series.
-    df[TARGET_COLUMN] = grp["occupied"].shift(-1)
-    df["next_hour"] = grp["hour"].shift(-1)
-    df["next_dow"] = grp["dow"].shift(-1)
-
-    # Last row of each series has no "next" reading -- drop it.
-    df = df.dropna(subset=[TARGET_COLUMN, "next_hour", "next_dow"]).copy()
-    df[TARGET_COLUMN] = df[TARGET_COLUMN].astype(int)
-    df["next_hour"] = df["next_hour"].astype(int)
-    df["next_dow"] = df["next_dow"].astype(int)
-    return df
+    return grouped.reset_index(drop=True)
 
 
 def train_model(train_df: pd.DataFrame, n_estimators: int = 40, max_depth: int = 6) -> RandomForestClassifier:
@@ -102,18 +125,12 @@ def predict_model_proba(model: RandomForestClassifier, df: pd.DataFrame) -> np.n
     return model.predict_proba(df[FEATURE_COLUMNS])[:, 1]
 
 
-def predict_baseline(train_df: pd.DataFrame, eval_df: pd.DataFrame) -> np.ndarray:
-    """Fixed-schedule baseline: majority-vote occupancy per (channel,
-    hour-of-day) learned from training data only, exactly the static-table
-    pattern this project argues is insufficient on its own. Predicts the
-    *next* window's occupancy using only that window's hour-of-day -- no
-    access to current sensing trend, matching a real static database."""
-    schedule = (
-        train_df.groupby(["channel", "next_hour"])[TARGET_COLUMN]
-        .apply(lambda s: int(s.mean() >= 0.5))
-        .to_dict()
-    )
-    return eval_df.apply(lambda r: schedule.get((r["channel"], r["next_hour"]), 0), axis=1).to_numpy()
+def predict_naive_vote_baseline(df: pd.DataFrame) -> np.ndarray:
+    """The simple rule this has to beat: an unweighted majority vote of single-node
+    energy-detection flags (each node's own RSSI against ENERGY_DETECTION_THRESHOLD_DBM).
+    Uses only `naive_vote_frac` -- no confidence weighting, no history, no cross-channel
+    learning -- exactly what a network of nodes would do with no ML layer at all."""
+    return (df["naive_vote_frac"] >= 0.5).astype(int).to_numpy()
 
 
 def score(y_true, y_pred) -> dict:
@@ -148,7 +165,7 @@ def measure_latency_ms(model, df: pd.DataFrame, n_runs: int = 200) -> float:
 def run_comparison(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
     model = train_model(train_df)
     ml_preds = predict_model(model, test_df)
-    baseline_preds = predict_baseline(train_df, test_df)
+    baseline_preds = predict_naive_vote_baseline(test_df)
 
     return {
         "model": model,
@@ -162,13 +179,13 @@ if __name__ == "__main__":
     from sensing_sim import generate_dataset
 
     raw = generate_dataset()
-    featured = add_features(raw)
-    train_df = featured[featured["split"] == "train"]
-    test_df = featured[featured["split"] == "test"]
+    fused = build_fusion_frame(raw)
+    train_df = fused[fused["split"] == "train"]
+    test_df = fused[fused["split"] == "test"]
 
     result = run_comparison(train_df, test_df)
-    print("ML model :", result["ml_score"])
-    print("Baseline :", result["baseline_score"])
+    print("ML model (fusion)  :", result["ml_score"])
+    print("Naive-vote baseline:", result["baseline_score"])
     print(f"Latency  : {result['latency_ms']} ms/prediction (budget: {MAX_LATENCY_MS} ms)")
 
     path = save_model(result["model"])

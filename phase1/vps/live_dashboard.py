@@ -3,6 +3,14 @@ MASAISAI Phase-1 LIVE dashboard -- reads real MQTT-ingested readings and
 constraint-engine decisions from MySQL (fed by ingest_service.py), instead
 of the synthetic in-process pipeline the prototype dashboard used.
 
+Reworked 27 Jul 2026 (same night as ingest_service.py's forecasting->fusion pivot): access
+decisions are now per-CHANNEL fused verdicts (ingest_service.py stores them with
+node_id="FUSED"), not per (node, channel) anymore -- one node's own reading no longer gets
+its own independent decision, since the whole point of fusion is combining every node
+currently reporting on a channel into one verdict. Sensing readings are still logged per
+real node (unchanged) for full dataset transparency; only decisions moved to channel
+granularity.
+
 Run under systemd (masaisai-dashboard.service) on port 8501.
 """
 
@@ -96,7 +104,7 @@ def q(sql: str, params=None) -> pd.DataFrame:
 
 
 st.set_page_config(
-    page_title="MASAISAI -- Live Spectrum Access Console",
+    page_title="MASAISAI -- Live Spectrum Idle-Verification Console",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -155,13 +163,13 @@ st_autorefresh(interval=REFRESH_SECONDS * 1000, key="datarefresh")
 st.markdown(
     f"""
     <div class="masaisai-header">
-      <div class="masaisai-title">MASAISAI &mdash; Live Spectrum Access Console</div>
+      <div class="masaisai-title">MASAISAI &mdash; Live Spectrum Idle-Verification Console</div>
       <div class="live-pill"><span class="live-dot"></span>LIVE &middot; refreshing every {REFRESH_SECONDS}s</div>
     </div>
     <div class="masaisai-sub">
-      Real readings arrive over MQTT from sensing nodes, are scored by the ML occupancy
-      model, and pass through the POTRAZ-rules constraint engine &mdash; the rules layer
-      always has final veto.
+      Real readings arrive over MQTT from sensing nodes; every node currently reporting on a
+      channel is fused into one verdict by the ML model, then passed through the
+      POTRAZ-rules constraint engine &mdash; the rules layer always has final veto.
     </div>
     """,
     unsafe_allow_html=True,
@@ -174,20 +182,6 @@ if readings.empty:
     st.info("Waiting for the first sensing reading... start the Wokwi node simulation.")
     st.stop()
 
-last_ts = pd.to_datetime(readings["timestamp"].iloc[0])
-age = (datetime.utcnow() - last_ts).total_seconds()
-grants = int((decisions["granted"] == 1).sum())
-denies = int((decisions["granted"] == 0).sum())
-
-c1, c2, c3, c4, c5, c6 = st.columns(6)
-c1.metric("Sensing nodes", readings["node_id"].nunique())
-c2.metric("Channels scanned", readings["channel"].nunique())
-c3.metric("Readings stored", len(readings))
-c4.metric("Last reading", f"{age:.0f}s ago")
-c5.metric("Granted", grants)
-c6.metric("Denied", denies)
-
-
 def channel_sort_key(ch):
     n = str(ch).replace("CH", "")
     return CHANNEL_ORDER.index(int(n)) if n.isdigit() and int(n) in CHANNEL_ORDER else 99
@@ -197,16 +191,34 @@ def latest_per(df: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
     return df.sort_values("id").groupby(keys).tail(1)
 
 
-def with_decision(df: pd.DataFrame, dec: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
-    dec_latest = latest_per(dec, keys)
+def with_decision(df: pd.DataFrame, dec: pd.DataFrame) -> pd.DataFrame:
+    """Merges in each row's CHANNEL's latest fused decision -- decisions are no longer
+    per-node (ingest_service.py fuses every node currently reporting on a channel into one
+    verdict, stored under node_id="FUSED"), so the join key is channel alone."""
+    dec_latest = latest_per(dec, ["channel"])
     out = df.merge(
-        dec_latest[keys + ["granted", "reason", "ml_probability"]], on=keys, how="left"
+        dec_latest[["channel", "granted", "reason", "ml_probability"]], on="channel", how="left"
     )
-    out["decision"] = out["granted"].map({1: "\U0001f7e2 GRANT", 0: "\U0001f534 DENY"})
+    out["decision"] = out["granted"].map({1: "\U0001f7e2 VERIFIED IDLE", 0: "\U0001f534 FLAGGED"})
     out["freq_mhz"] = out["channel"].map(channel_to_freq_mhz)
     out["signal"] = out["rssi_dbm"].map(rssi_quality)
     out["signal_bar"] = out["signal"].map(QUALITY_BARS) + "  " + out["signal"]
     return out
+
+
+last_ts = pd.to_datetime(readings["timestamp"].iloc[0])
+age = (datetime.utcnow() - last_ts).total_seconds()
+latest_decisions = latest_per(decisions, ["channel"])
+verified = int((latest_decisions["granted"] == 1).sum())
+flagged = int((latest_decisions["granted"] == 0).sum())
+
+c1, c2, c3, c4, c5, c6 = st.columns(6)
+c1.metric("Sensing nodes", readings["node_id"].nunique())
+c2.metric("Channels scanned", readings["channel"].nunique())
+c3.metric("Readings stored", len(readings))
+c4.metric("Last reading", f"{age:.0f}s ago")
+c5.metric("Verified idle", verified)
+c6.metric("Flagged", flagged)
 
 
 # ---------- Node focus selector ----------
@@ -220,7 +232,7 @@ if focus == "All nodes":
     st.markdown('<div class="section-label">All nodes &mdash; latest status</div>', unsafe_allow_html=True)
     st.caption("Pick a node above to drill into its own channel-by-channel view and RSSI history.")
 
-    overview = with_decision(latest_per(readings, ["node_id"]), decisions, ["node_id", "channel"])
+    overview = with_decision(latest_per(readings, ["node_id"]), decisions)
     overview = overview.sort_values("node_id")
 
     st.dataframe(
@@ -268,19 +280,27 @@ if focus == "All nodes":
     )
     st.plotly_chart(bar_fig, width="stretch", config={"displayModeBar": False})
     st.caption(
-        "Green = GRANT (verified idle), red = DENY (incumbent detected). "
-        "Bar height is each node's most recent RSSI reading, on whichever channel it "
-        "was scanning last."
+        "Green = VERIFIED IDLE, red = FLAGGED (incumbent likely present, or sensing "
+        "confidence too low to trust). Bar height is each node's most recent RSSI reading, "
+        "on whichever channel it was scanning last -- the decision itself is the fused "
+        "verdict for that whole channel, not this one node's reading alone."
     )
 
     audit_scope = decisions.copy()
 else:
     # ---------- Single-node detail ----------
     node_readings = readings[readings["node_id"] == focus]
-    node_decisions = decisions[decisions["node_id"] == focus]
+    # Decisions are fused per-channel now (node_id="FUSED"), not per real node -- scope the
+    # audit/detail view to whichever channels this node happens to be reporting on.
+    node_decisions = decisions[decisions["channel"].isin(node_readings["channel"].unique())]
 
     st.markdown(f'<div class="section-label">{focus} &mdash; latest reading per channel</div>', unsafe_allow_html=True)
-    merged = with_decision(latest_per(node_readings, ["node_id", "channel"]), node_decisions, ["node_id", "channel"])
+    st.caption(
+        "The decision column is each channel's fused verdict across every node currently "
+        "reporting on it, not just this node's own reading -- see the 'All nodes' view for "
+        "the full contributing picture."
+    )
+    merged = with_decision(latest_per(node_readings, ["node_id", "channel"]), node_decisions)
     merged = merged.sort_values("channel", key=lambda s: s.map(channel_sort_key))
 
     st.dataframe(
@@ -295,7 +315,7 @@ else:
                 "Sensing confidence", min_value=0.0, max_value=1.0, format="%.2f"
             ),
             "ml_probability": st.column_config.ProgressColumn(
-                "P(occupied, next 15m)", min_value=0.0, max_value=1.0, format="%.2f"
+                "P(occupied) -- fused", min_value=0.0, max_value=1.0, format="%.2f"
             ),
             "decision": "Decision",
             "timestamp": st.column_config.DatetimeColumn("Last seen", format="HH:mm:ss"),
@@ -306,10 +326,10 @@ else:
 
     st.markdown(f'<div class="section-label">{focus} &mdash; RSSI over time, all channels</div>', unsafe_allow_html=True)
     st.caption(
-        "Watch a line cross the dotted **-75 dBm** threshold: crossing **up** means the "
-        "constraint engine sees the incumbent broadcaster active and flips that channel's "
-        "decision to **DENY**; crossing **down** means the channel is verified idle and "
-        "eligible for **GRANT**. The table above updates within a few seconds of each crossing."
+        "Watch a line cross the dotted **-75 dBm** threshold: crossing **up** on enough "
+        "nodes flips that channel's fused verdict to **FLAGGED**; crossing **down** on "
+        "enough nodes verifies the channel **IDLE**. The table above updates within a few "
+        "seconds of each crossing."
     )
     chart_df = node_readings.sort_values("id").copy()
     chart_df["timestamp"] = pd.to_datetime(chart_df["timestamp"])
@@ -354,7 +374,7 @@ else:
 with st.expander("Full audit log (every decision, fully explained)"):
     audit = audit_scope.copy()
     audit["freq_mhz"] = audit["channel"].map(channel_to_freq_mhz)
-    audit["decision"] = audit["granted"].map({1: "\U0001f7e2 GRANT", 0: "\U0001f534 DENY"})
+    audit["decision"] = audit["granted"].map({1: "\U0001f7e2 VERIFIED IDLE", 0: "\U0001f534 FLAGGED"})
     st.dataframe(
         audit[["timestamp", "node_id", "channel", "freq_mhz", "decision", "reason",
                "ml_probability", "sensing_confidence", "expires_at"]],

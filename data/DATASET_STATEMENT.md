@@ -20,24 +20,33 @@ Per (simulated) UHF DTT channel, per sensing node, per hour:
    an unrealistically simple all-channels-identical pattern.
 2. A Bernoulli draw against that probability produces the ground-truth `occupied` label for
    the hour.
-3. A 3% random label flip is applied to simulate multipath fading / transient interference
-   causing an occasional incorrect reading -- real spectrum sensing is not noise-free, and a
-   dataset without this noise would make the ML-vs-baseline comparison meaninglessly easy.
+3. A 3% random label flip is applied to the shared ground truth (simulating a broader,
+   moment-in-time misread every node would agree on), and -- reworked 27 Jul 2026, needed for
+   the multi-node fusion task described below -- an **independent per-node** fade/interference
+   event (~15% chance per node per reading, a large random RSSI offset) simulating multipath
+   fade or transient interference hitting *one node's own reading* while every other node
+   keeps reporting correctly. This second, independent noise source is what gives fusion
+   something real to correct that a shared label flip alone cannot: a shared flip fools every
+   node identically (a plain vote is unaffected by it), while an independent per-node fade is
+   exactly the scenario an unweighted vote can get wrong and a confidence-aware fusion model
+   can catch.
 4. RSSI is derived from the (possibly flipped) occupied state plus per-node attenuation
-   (modelling different distances from a hypothetical transmitter) and Gaussian sensor noise.
+   (modelling different distances from a hypothetical transmitter, drawn per node across a
+   wide 0-60 dB range so some nodes are structurally more reliable than others) and Gaussian
+   sensor noise, then the independent per-node fade offset from step 3 if that node faded on
+   this reading. Sensing confidence degrades with attenuation and drops further on a faded
+   reading, feeding the constraint engine's fail-safe behaviour.
 5. A held-out **test period only** (last N days) additionally injects unannounced schedule
    irregularities -- an active channel going briefly quiet, or an inactive one extending its
    broadcast window -- that a model trained only on the earlier "normal" period cannot have
-   memorized. This is what makes the ML-vs-fixed-schedule-baseline comparison in
-   `tests/test_occupancy_model.py` a genuine generalisation test rather than a memorization test.
+   memorized.
 
 ## Labels
 
-- `occupied` (0/1): ground-truth simulated incumbent activity for that node/channel/hour.
-- `occupied_next` (derived in `occupancy_model.add_features`): the forecasting target -- the
-  *next* hour's `occupied` value for the same node+channel, used to train/evaluate genuine
-  next-window prediction rather than same-window classification (see the module docstring in
-  `src/occupancy_model.py` for why this distinction matters for the AI-justification case).
+- `occupied` (0/1): ground-truth simulated incumbent activity for that channel/hour, shared
+  by every node sensing it that hour -- and, since 27 Jul 2026, the direct fusion-model
+  target (`occupancy_model.build_fusion_frame`); there is no forecasting target anymore, the
+  model verifies the current window using every node reporting on it, not a future one.
 
 ## Validation performed
 
@@ -49,11 +58,12 @@ suite:
 - Per-channel occupancy rates fall within a plausible range for DTT broadcast patterns
   (most channels active a majority of the day, none at 0% or 100%) -- see
   `_CHANNEL_PROFILES` in `sensing_sim.py`.
-- The held-out test period's schedule irregularities measurably change the ML-vs-baseline
-  gap in the expected direction (`tests/test_occupancy_model.py::test_ml_model_beats_fixed_schedule_baseline_on_held_out_period`),
-  confirming the synthetic irregularities are neither too weak to matter nor so strong they
-  make the task trivial (see the note in `occupancy_model.py` about the earlier 100%-accuracy
-  version being flagged and corrected as unrealistic/leaky).
+- The fusion model measurably outperforms the unweighted naive-vote baseline on the held-out
+  test period (`tests/test_occupancy_model.py::test_ml_fusion_beats_naive_vote_baseline_on_held_out_period`),
+  and that result was itself checked for the same leakage failure mode an earlier version of
+  this project's (then-forecasting) model was once caught making: feature importances were
+  inspected directly and are well-distributed across several features, not dominated by one
+  proxy -- see `src/occupancy_model.py`'s module docstring.
 
 ## What changes for the real pilot
 

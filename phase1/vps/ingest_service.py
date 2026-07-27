@@ -2,14 +2,23 @@
 MASAISAI Phase-1 ingestion service.
 
 Subscribes to masaisai/sensing/# on the local Mosquitto broker, stores every
-reading in MySQL, runs the trained occupancy model + POTRAZ-rules constraint
-engine on it, and stores the resulting access decision (full audit trail).
+raw reading in MySQL, fuses each channel's currently-known per-node readings
+through the trained occupancy model + POTRAZ-rules constraint engine, and
+stores the resulting per-channel verdict (full audit trail).
 
-This is the live version of the pipeline the simulated prototype proved:
-same model (occupancy_model.train_model), same rules engine
-(constraint_engine.decide_access) -- only the data source changed from
-sensing_sim.py to real MQTT readings, exactly as promised in the proposal
-(Section 2.2 / DATASET_STATEMENT "What changes for the real pilot").
+Reworked 27 Jul 2026 (same night as occupancy_model.py's forecasting->fusion
+pivot -- see src/occupancy_model.py's module docstring and
+Pitching and Presenting/04_ANTICIPATED_QUESTIONS.md section 1) to match: this
+service no longer scores one node's reading in isolation against a next-window
+forecast. It keeps a last-known-reading cache per (channel, node) -- a
+standard asynchronous multi-sensor fusion pattern -- and on every incoming
+reading recomputes that channel's fused verdict from every node currently
+reporting on it, exactly mirroring src/occupancy_model.build_fusion_frame's
+feature set. Same model class, same rules engine (constraint_engine.
+decide_access), same "AI predicts, rules decide" architecture as the
+simulated prototype -- only the data source changed from sensing_sim.py to
+real MQTT readings, exactly as promised in the proposal (Section 2.2 /
+DATASET_STATEMENT "What changes for the real pilot").
 
 Runs under systemd (masaisai-ingest.service), restarts on failure/reboot.
 """
@@ -19,9 +28,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import statistics
 import sys
 from collections import defaultdict, deque
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -31,8 +41,13 @@ import pymysql
 # src/ modules from the MASAISAI repo (deployed to /opt/masaisai/src)
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from constraint_engine import decide_access, load_rules  # noqa: E402
-from occupancy_model import FEATURE_COLUMNS, add_features, train_model  # noqa: E402
-from sensing_sim import _NODE_ATTENUATION_DB, generate_dataset  # noqa: E402
+from occupancy_model import (  # noqa: E402
+    ENERGY_DETECTION_THRESHOLD_DBM,
+    FEATURE_COLUMNS,
+    build_fusion_frame,
+    train_model,
+)
+from sensing_sim import generate_dataset  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("masaisai-ingest")
@@ -51,33 +66,22 @@ DB_NAME = os.environ.get("DB_NAME", "masaisai")
 # ---------- Train the model once at startup (seconds, per proposal 3.2) ----------
 log.info("Training occupancy model on synthetic bootstrap data...")
 _raw = generate_dataset()
-_featured = add_features(_raw)
-_train_df = _featured[_featured["split"] == "train"]
+_fused = build_fusion_frame(_raw)
+_train_df = _fused[_fused["split"] == "train"]
 MODEL = train_model(_train_df)
 _CHANNELS = sorted(_raw["channel"].unique().tolist())
 _CHANNEL_CODE = {ch: i for i, ch in enumerate(_CHANNELS)}
-_NODES = sorted(_raw["node_id"].unique().tolist())
-_NODE_CODE = {n: i for i, n in enumerate(_NODES)}
 RULES = load_rules()
-log.info("Model trained. %d channels, %d nodes in code maps.", len(_CHANNELS), len(_NODES))
+log.info("Model trained. %d channels in code map.", len(_CHANNELS))
 
-# Real Phase-1 field/Wokwi node IDs (e.g. "wokwi-node-01") never appear in
-# the synthetic training set, which only knows NODE1..NODE8 -- without this
-# map every real node silently fell back to node_code 0 via .get(id, 0),
-# i.e. every physical node was scored by the model as if it were NODE1
-# regardless of its actual position. node_code is really a proxy for a
-# node's path-loss/attenuation from the broadcaster, not its label, so map
-# each real node to whichever trained node has the closest attenuation
-# (mirrors main.cpp's NODE_ATTEN_DB: 0,2,4,...,18 dB for nodes 01..10).
-_FIELD_NODE_ATTEN_DB = {f"wokwi-node-{i:02d}": atten
-                         for i, atten in zip(range(1, 11), range(0, 20, 2))}
-_FIELD_NODE_CODE = {
-    field_id: _NODE_CODE[min(_NODE_ATTENUATION_DB, key=lambda n: abs(_NODE_ATTENUATION_DB[n] - atten))]
-    for field_id, atten in _FIELD_NODE_ATTEN_DB.items()
-}
-
-# Per (node, channel) history of previous occupied flags (for rolling rate)
-_history: dict[tuple, deque] = defaultdict(lambda: deque(maxlen=3))
+# Last-known reading per (channel -> {node_id: {rssi, confidence}}) -- readings
+# arrive asynchronously over MQTT, so fusion here means "every node's most
+# recently reported value for this channel," not a synchronized time window.
+_latest_readings: dict[str, dict[str, dict]] = defaultdict(dict)
+# Per-channel history of the fused verdict (for rolling_occupancy_rate) -- the
+# live substitute for build_fusion_frame's ground-truth history, since a real
+# deployment has no ground truth, only its own past verdicts.
+_channel_history: dict[str, deque] = defaultdict(lambda: deque(maxlen=3))
 
 
 def _db():
@@ -87,21 +91,39 @@ def _db():
     )
 
 
-def ml_probability(node_id: str, channel: str, rssi: float, occupied: int) -> float:
-    """Score next-window occupancy with the same features used in training."""
-    hist = _history[(node_id, channel)]
-    rolling = (sum(hist) / len(hist)) if hist else 0.5
-    nxt = datetime.now(UTC) + timedelta(minutes=15)
+def fuse_channel(channel: str) -> tuple[float, float]:
+    """Recomputes this channel's fused verdict from every node's latest known
+    reading, using the exact feature set build_fusion_frame trains on.
+    Returns (ml_probability, max_confidence) -- max, not mean, because one
+    reliable node should be enough to trust a reading even if others
+    currently reporting on this channel are degraded."""
+    readings = list(_latest_readings[channel].values())
+    rssi_vals = [r["rssi"] for r in readings]
+    conf_vals = [r["confidence"] for r in readings]
+    naive_flags = [1 if r["rssi"] > ENERGY_DETECTION_THRESHOLD_DBM else 0 for r in readings]
+    conf_sum = sum(conf_vals)
+    weighted_vote = (
+        sum(f * c for f, c in zip(naive_flags, conf_vals)) / conf_sum if conf_sum else 0.5
+    )
+    hist = _channel_history[channel]
+    now = datetime.now(UTC)
     row = pd.DataFrame([{
-        "next_hour": nxt.hour,
-        "next_dow": nxt.weekday(),
-        "rssi_dbm": rssi,
-        "occupied": occupied,
-        "rolling_occupancy_rate": rolling,
+        "hour": now.hour,
+        "dow": now.weekday(),
         "channel_code": _CHANNEL_CODE.get(channel, 0),
-        "node_code": _FIELD_NODE_CODE.get(node_id, _NODE_CODE.get(node_id, 0)),
+        "mean_rssi_dbm": statistics.fmean(rssi_vals),
+        "min_rssi_dbm": min(rssi_vals),
+        "max_rssi_dbm": max(rssi_vals),
+        "std_rssi_dbm": statistics.pstdev(rssi_vals) if len(rssi_vals) > 1 else 0.0,
+        "mean_confidence": statistics.fmean(conf_vals),
+        "min_confidence": min(conf_vals),
+        "max_confidence": max(conf_vals),
+        "naive_vote_frac": statistics.fmean(naive_flags),
+        "confidence_weighted_vote": weighted_vote,
+        "rolling_occupancy_rate": (sum(hist) / len(hist)) if hist else 0.5,
     }])
-    return float(MODEL.predict_proba(row[FEATURE_COLUMNS])[:, 1][0])
+    prob = float(MODEL.predict_proba(row[FEATURE_COLUMNS])[:, 1][0])
+    return prob, max(conf_vals)
 
 
 def on_message(client, userdata, msg):
@@ -114,9 +136,10 @@ def on_message(client, userdata, msg):
         conf = float(data["sensing_confidence"])
         now = datetime.now(UTC).replace(tzinfo=None)
 
-        prob = ml_probability(node_id, channel, rssi, occupied)
-        decision = decide_access(node_id, channel, prob, conf, RULES)
-        _history[(node_id, channel)].append(occupied)
+        _latest_readings[channel][node_id] = {"rssi": rssi, "confidence": conf}
+        prob, fused_confidence = fuse_channel(channel)
+        decision = decide_access("FUSED", channel, prob, fused_confidence, RULES)
+        _channel_history[channel].append(int(decision.granted))
 
         with _db() as conn, conn.cursor() as cur:
             cur.execute(
@@ -130,12 +153,12 @@ def on_message(client, userdata, msg):
             cur.execute(
                 "INSERT INTO access_decisions (node_id, channel, timestamp, granted, reason,"
                 " ml_probability, sensing_confidence, expires_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                (node_id, channel, now, int(decision.granted), decision.reason,
+                (decision.node_id, channel, now, int(decision.granted), decision.reason,
                  decision.ml_probability, decision.sensing_confidence, expires),
             )
-        log.info("%s %s rssi=%.1f occ=%d conf=%.2f p=%.2f -> %s",
-                 node_id, channel, rssi, occupied, conf, prob,
-                 "GRANT" if decision.granted else "DENY")
+        log.info("%s %s rssi=%.1f conf=%.2f -> fused p=%.2f (n=%d nodes) -> %s",
+                 node_id, channel, rssi, conf, prob, len(_latest_readings[channel]),
+                 "VERIFIED IDLE" if decision.granted else "FLAGGED")
     except Exception:
         log.exception("Failed to process message on %s", msg.topic)
 

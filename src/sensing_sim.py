@@ -38,7 +38,7 @@ _CHANNEL_PROFILES = {
     for ch in CHANNELS
 }
 
-_NODE_ATTENUATION_DB = {f"NODE{i}": _rng_master.uniform(0, 18) for i in range(1, 9)}
+_NODE_ATTENUATION_DB = {f"NODE{i}": _rng_master.uniform(0, 60) for i in range(1, 9)}
 
 
 def _channel_active_probability(channel: str, hour: int, is_test_period: bool, day_index: int) -> float:
@@ -90,17 +90,30 @@ def generate_dataset(n_days: int = 21, nodes: list[str] | None = None,
                     occupied = 1 - occupied
                 for node in nodes:
                     atten = _NODE_ATTENUATION_DB[node]
-                    node_noise = rng.normal(0, 1.5)
+                    node_noise = rng.normal(0, 5)
                     if occupied:
                         rssi = -35 - atten + node_noise  # strong incumbent signal
                     else:
-                        rssi = -95 + rng.normal(0, 3) - 0.2 * atten  # noise floor
+                        rssi = -95 + rng.normal(0, 5) - 0.2 * atten  # noise floor
 
-                    # Sensing confidence degrades with attenuation/distance and
-                    # occasional node dropout (feeds the constraint engine's
-                    # fail-safe-off behaviour).
+                    # Independent per-node multipath fade / transient interference:
+                    # unlike the shared 3% flip above (which relabels the *true* state for
+                    # every node identically, so a plain vote is unaffected), this hits one
+                    # node's *reading* only, at a moment when every other node is still
+                    # reporting correctly -- exactly the scenario a fused, confidence-aware
+                    # model can correct for and an unweighted per-node vote can't, because it
+                    # has no way to tell a faded reading from a clean one.
+                    faded = rng.random() < 0.15
+                    if faded:
+                        rssi += rng.normal(0, 14)
+
+                    # Sensing confidence degrades with attenuation/distance, occasional node
+                    # dropout (feeds the constraint engine's fail-safe-off behaviour), and a
+                    # faded reading (the node itself is less sure of what it just measured).
                     dropout = rng.random() < 0.01
-                    confidence = 0.0 if dropout else float(np.clip(1.0 - atten / 25 + rng.normal(0, 0.03), 0.05, 0.99))
+                    confidence = 0.0 if dropout else float(np.clip(1.0 - atten / 60 + rng.normal(0, 0.03), 0.05, 0.99))
+                    if faded and not dropout:
+                        confidence = float(np.clip(confidence * 0.4, 0.05, 0.99))
 
                     rows.append({
                         "day_index": day_index,

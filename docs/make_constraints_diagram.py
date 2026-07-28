@@ -56,10 +56,12 @@ box(0.2, 1.5, 6.9, 1.7,
     "Runs comfortably on Raspberry-Pi-class hardware.",
     face=SURFACE, edge=SURFACE, text_color="white", fontsize=9.5)
 
-ax.text(0.2, 1.15,
+ax.text(0.2, 1.4,
     "Honest gap: RSSI alone can't yet tell a specific broadcaster from another\n"
-    "transmitter on the same frequency -- that needs real I/Q + cyclostationary detection.",
-    fontsize=8.6, color=AMBER, weight="bold", style="italic")
+    "transmitter on the same frequency -- that needs real I/Q + cyclostationary detection.\n"
+    "Also not yet measured on real hardware: device RAM/power draw, and offline-then-resync\n"
+    "behaviour -- verified only for the model itself (above), not the physical node yet.",
+    fontsize=8.2, color=AMBER, weight="bold", style="italic", va="top")
 
 # ============ RIGHT: DATA CONSTRAINTS ============
 ax.text(7.75, 7.85, "DATA CONSTRAINTS", fontsize=15, weight="bold", color=GOLD)

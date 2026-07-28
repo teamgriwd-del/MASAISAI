@@ -11,10 +11,10 @@ ax.axis("off")
 
 boxes = [
     ("Sensing Layer\nRTL-SDR nodes\n(Raspberry Pi host)", 0.4, 4.6, "#2f6fed"),
-    ("Data Layer\nTime-series\noccupancy store", 2.9, 4.6, "#2f6fed"),
-    ("ML Occupancy\nEngine\n(RandomForest\nforecast model)", 5.4, 4.6, "#0a1224"),
+    ("Data Layer\nMulti-node RSSI +\nconfidence readings", 2.9, 4.6, "#2f6fed"),
+    ("AI Fusion Engine\n(RandomForest --\nfuses every node on\na channel)", 5.4, 4.6, "#0a1224"),
     ("Rules / Constraint\nLayer\n(ZNFAP as hard\nconstraints)", 7.9, 4.6, "#c0392b"),
-    ("Access Layer\nGrant/revoke to\nrural CPE / base\nstation", 5.4, 1.8, "#2f6fed"),
+    ("Flagging Layer\nVerified idle, or\nflagged for review\n(never autonomous)", 5.4, 1.8, "#2f6fed"),
     ("Dashboard / Audit\nLayer (POTRAZ\nvisibility + override)", 7.9, 1.8, "#2f6fed"),
 ]
 
@@ -38,8 +38,8 @@ for x1, y1, x2, y2 in arrows:
 
 ax.text(0.4, 6.2, "MASAISAI System Architecture", fontsize=15, weight="bold", color="#0a1224")
 ax.text(0.4, 0.5,
-        "Rules layer always has final veto over the ML layer -- ML predictions never bypass\n"
-        "POTRAZ-defined protected channels or fail-safe sensing-confidence checks.",
+        "Rules layer always has final veto over the AI layer -- the AI predicts, it never\n"
+        "decides. Fusion, not forecasting: combines every node reporting on a channel.",
         fontsize=8.5, color="#555555", style="italic")
 
 plt.tight_layout()

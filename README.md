@@ -25,8 +25,13 @@ See `docs/architecture.png` and the full written proposal
 
 ## Demo
 
-This repository is a **working simulated prototype** -- no real RTL-SDR hardware or POTRAZ
-monitoring feed was available during proposal preparation (see
+**Live Phase-1 dashboard (hardware-in-the-loop):** http://38.247.146.172:8501 -- a real Wokwi
+ESP32 sensing node publishes over MQTT to this VPS, which fuses every node's reading, runs it
+through the trained model + rules engine, and shows the live classification with full audit
+trail. This is real, running code reacting to a live reading, not a recording.
+
+This repository is also a **working simulated prototype** -- no real RTL-SDR hardware or
+POTRAZ monitoring feed was available during proposal preparation (see
 `data/DATASET_STATEMENT.md` for full disclosure). Synthetic sensing data drives real,
 tested ML and constraint-engine logic end-to-end.
 

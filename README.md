@@ -25,21 +25,37 @@ See `docs/architecture.png` and the full written proposal
 
 ## Demo
 
-**Live Phase-1 dashboard (hardware-in-the-loop):** http://38.247.146.172:8501 -- a real Wokwi
-ESP32 sensing node publishes over MQTT to this VPS, which fuses every node's reading, runs it
-through the trained model + rules engine, and shows the live classification with full audit
-trail. This is real, running code reacting to a live reading, not a recording. See
-`phase1/README.md` for how to run the Wokwi node yourself and reproduce this end to end.
+This repo is two separate, independently-runnable things. Knowing which one you're looking
+at matters -- full breakdown in `docs/SYSTEM_ARCHITECTURE.md`.
 
-This repository is also a **working simulated prototype** -- no real RTL-SDR hardware or
-POTRAZ monitoring feed was available during proposal preparation (see
-`data/DATASET_STATEMENT.md` for full disclosure). Synthetic sensing data drives real,
-tested ML and constraint-engine logic end-to-end.
+### 1. Live Phase-1 pipeline -- real data, hosted on the VPS, not on your machine
+
+**Live dashboard, already running, nothing to install:** http://38.247.146.172:8501
+
+Everything backing that URL -- the MQTT broker, the ingest/fusion service, and the **MySQL
+database** -- is already deployed and running on the VPS (`38.247.146.172`). None of it lives
+in this repo or on your machine. To make new live data actually flow (rather than just
+viewing whatever's already there):
+
+1. Go into `phase1/` and open `phase1/README.md`.
+2. Follow it to run the Wokwi ESP32 simulator **locally, in VS Code** (PlatformIO + Wokwi
+   Simulator extensions) -- this is the only piece you run yourself.
+3. That simulator publishes real MQTT messages straight to the already-hosted VPS backend
+   above. You don't stand up a server or a database -- it's already there, already running.
+4. Watch your own reading land in the live dashboard within a few seconds.
+
+### 2. Synthetic prototype -- runs entirely on your machine, no VPS/network involved
 
 ```bash
 pip install -r requirements.txt
 streamlit run src/dashboard_app.py
 ```
+
+This is a **separate, self-contained copy** of the same AI pipeline, fed by generated
+synthetic data instead of real sensors -- no real RTL-SDR hardware or POTRAZ monitoring feed
+was available during proposal preparation (see `data/DATASET_STATEMENT.md` for full
+disclosure). It computes everything in-memory each run; there is no database here at all --
+the real MySQL database only exists on the VPS, as part of the live pipeline above.
 
 Or run the pipeline pieces directly:
 
@@ -58,6 +74,14 @@ longer forecasts a future window to feed a grant/deny decision -- it fuses sever
 independently noisy, confidence-scored sensing nodes into one verified, current-window
 idle/occupied verdict per channel, which a single sensor or an unweighted vote can't reach as
 reliably. See the module docstring in `src/occupancy_model.py`.
+
+**Full consolidated reference (UI, app layer, database, AI model, integrations, hosting,
+failure paths, all mapped against what's local vs. what's on the VPS):**
+`docs/SYSTEM_ARCHITECTURE.md`. Supporting diagrams: `docs/network_topology.png` (logical +
+physical), `docs/physical_deployment_example.png` (illustrative real-place-name ground
+layout), `docs/ai_solution_diagram.png` (the AI mechanism itself), `docs/constraints_diagram.png`
+(hardware + data constraints). Business model: `docs/business_model.md` /
+`docs/business_model_diagram.png`.
 
 ## Data
 
@@ -88,8 +112,20 @@ pytest tests/ -v
 
 ## Environment Variables
 
-Not required for the current simulated prototype. See `.env.example` for the variables
-the Phase 1 real-hardware pilot will need (MQTT broker, ZCHPC CCE endpoint).
+Not required for the synthetic prototype (`src/dashboard_app.py`) -- it runs fully offline.
+The live Phase-1 pipeline's real variables (MQTT broker host/user/pass, DB host/port/user/
+pass/name) are documented in `phase1/vps/.env.example` and are only ever set **on the VPS
+itself** -- there is nothing to configure locally to view the live dashboard or run the Wokwi
+node against it. See `.env.example` at the repo root for the broader Phase-1-hardware-pilot
+variable set (ZCHPC CCE endpoint, etc.) beyond what's already deployed tonight.
+
+## Database
+
+There is no local database anywhere in this repo. The synthetic prototype computes
+everything in-memory per run. The live pipeline's MySQL database (`sensing_readings` +
+`access_decisions` tables) lives **only on the VPS** (`38.247.146.172`) -- schema at
+`phase1/vps/schema.sql`. See `docs/SYSTEM_ARCHITECTURE.md` for the full local-vs-VPS
+breakdown.
 
 ## Tests
 

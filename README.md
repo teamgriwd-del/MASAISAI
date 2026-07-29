@@ -157,4 +157,5 @@ See `docs/deployment_plan.md`.
 
 - Arnold (GRIWD) -- RF/transmission engineering background; NUST Telecommunications
   Engineering (Level 4.2). Sensing-node hardware, RF signal processing, ML occupancy model.
-- Adrianny Jaliele -- NUST Telecommunications/Engineering. [specialisation to confirm].
+- Adrianny Jaliele -- RF/transmission engineering background; NUST Telecommunications
+  Engineering (Level 4.2). Sensing-node hardware, RF signal processing, ML occupancy model.

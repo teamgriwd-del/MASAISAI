@@ -1,0 +1,11 @@
+# Development extras, on top of requirements.txt.
+#
+#   streamlit   optional local host for src/dashboard_app.py. The deployed
+#               console is static and does not use it.
+#   plotly      used by the older phase1/vps/live_dashboard.py only.
+#   matplotlib  used by docs/make_*_diagram.py to regenerate the figures.
+-r requirements.txt
+streamlit==1.58.0
+pytest==9.1.1
+plotly==6.7.0
+matplotlib==3.10.9

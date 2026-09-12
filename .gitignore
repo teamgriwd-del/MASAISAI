@@ -10,3 +10,10 @@ venv/
 .pio/
 *.log
 .env
+
+# Static export and local UI backups
+dist/
+.backup/
+
+# Editor/launch config with machine-specific absolute paths
+.claude/

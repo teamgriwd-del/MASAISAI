@@ -1,8 +1,6 @@
+# Core: everything needed to run the backend and build the static console.
+# This is all a build machine or CI needs -- no web framework.
 pandas==3.0.2
 numpy==2.4.4
 scikit-learn==1.9.0
 joblib==1.5.3
-streamlit==1.58.0
-pytest==9.1.1
-matplotlib==3.10.9
-plotly==6.7.0

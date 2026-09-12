@@ -43,7 +43,7 @@ PAGE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="MASAISAI -- AI-driven dynamic spectrum access for rural broadband. POTRAZ AI for Impact.">
-<meta name="theme-color" content="#07111f">
+<meta name="theme-color" content="#15110b">
 <title>MASAISAI -- Spectrum Intelligence</title>
 <link rel="icon" href="data:image/svg+xml,{FAVICON}">
 <link rel="stylesheet" href="{BASE}styles.css?v={VERSION}">
@@ -61,7 +61,7 @@ PAGE = """<!doctype html>
 
 FAVICON = (
     "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' "
-    "stroke='%232dc6f0' stroke-width='1.8' stroke-linecap='round'%3E"
+    "stroke='%23e3b04b' stroke-width='1.8' stroke-linecap='round'%3E"
     "%3Ccircle cx='12' cy='11' r='1.8'/%3E"
     "%3Cpath d='M7.6 6.6a6.2 6.2 0 0 0 0 8.8M16.4 15.4a6.2 6.2 0 0 0 0-8.8'/%3E"
     "%3Cpath d='M12 13v8.5'/%3E%3C/svg%3E"

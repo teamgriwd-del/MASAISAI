@@ -55,19 +55,19 @@
     potraz: 'M12 2.5v4M12 17.5v4M4.6 5.3l2.8 2.8M16.6 15.9l2.8 2.8M2.5 12h4M17.5 12h4M4.6 18.7l2.8-2.8M16.6 8.1l2.8-2.8',
   };
   const icon = (name, cls = '') =>
-    `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${P[name]}"/></svg>`;
+    `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="square" stroke-linejoin="miter"><path d="${P[name]}"/></svg>`;
 
   /* ------------------------------------------------------------ colours -- */
-  const COL = { green: '#2fd08a', blue: '#3b82f6', cyan: '#2dc6f0', amber: '#f2b52d',
-    red: '#ef5350', gray: '#6b7c97', violet: '#9b7bf2' };
+  const COL = { green: '#5fa344', blue: '#c99a3e', cyan: '#e3b04b', amber: '#d9852f',
+    red: '#b84b36', gray: '#8a7c64', violet: '#9c6b3f' };
   const AVAIL = { high: COL.green, moderate: COL.amber, low: COL.red, offline: COL.gray };
   const STATUS_PILL = { AVAILABLE: 'green', OCCUPIED: 'red', PROTECTED: 'gray', FLAGGED: 'amber' };
   const DECISION_PILL = { Granted: 'green', Denied: 'red', Revoked: 'amber' };
   // The fusion model is decisive, so most cells sit at either end of the ramp. The top stop
-  // is kept to a muted lime rather than a saturated yellow so a mostly-occupied band reads
-  // as instrumentation rather than a warning sign.
-  const RAMP = [[0, [17, 45, 88]], [0.3, [27, 86, 160]], [0.55, [38, 150, 190]],
-    [0.8, [112, 190, 150]], [1, [188, 208, 104]]];
+  // is kept to a muted rust rather than an alarm red so a mostly-occupied band reads
+  // as instrumentation rather than a warning sign -- dark stone (idle) through gold to rust.
+  const RAMP = [[0, [26, 22, 15]], [0.3, [74, 57, 32]], [0.55, [161, 122, 55]],
+    [0.8, [199, 144, 64]], [1, [180, 90, 58]]];
   function ramp(t) {
     t = Math.max(0, Math.min(1, t));
     for (let i = 1; i < RAMP.length; i++) {
@@ -149,7 +149,7 @@
         ${stage('', 'wave', 'Signal Processing', L.naive_state, L.naive_state === 'IDLE' ? 'green' : 'red',
           `Naive vote ${Math.round(L.naive_vote * nodesHeard)}/${nodesHeard} occupied`)}
         ${stage('ml', 'cpu', 'ML Prediction', `${pct(L.p_idle)} IDLE`, 'violet',
-          'Fused P(idle), current window', '<span class="stage-tag adv">ADVISORY &middot; NOT AN AUTHORISATION</span>')}
+          'Fused P(idle), current window', '<span class="stage-tag adv">Advisory, not an authorisation</span>')}
         ${stage('rules', 'scale', 'POTRAZ Rules', allPass ? 'PASS' : 'FAIL', allPass ? 'blue' : 'red',
           `${passed}/${enforced} enforced checks pass`, '<span class="stage-tag auth">FINAL AUTHORITY</span>')}
         ${stage(L.granted ? 'decide' : 'decide flag', 'key', 'Access Decision',
@@ -188,11 +188,11 @@
     const grid = [];
     for (let lon = 26; lon <= 33; lon++) {
       const [x] = proj(lon, LAT0);
-      grid.push(`<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="#12233d" stroke-width="${0.5 * u}"/>`);
+      grid.push(`<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="#2a2216" stroke-width="${0.5 * u}"/>`);
     }
     for (let lat = -16; lat >= -22; lat--) {
       const [, y] = proj(LON0, lat);
-      grid.push(`<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="#12233d" stroke-width="${0.5 * u}"/>`);
+      grid.push(`<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="#2a2216" stroke-width="${0.5 * u}"/>`);
     }
     const nodes = D.nodes.map((n) => {
       const [x, y] = proj(n.lon, n.lat);
@@ -204,7 +204,7 @@
           aria-label="${esc(n.label)} ${esc(n.town)}, ${n.availability} availability">
         <circle class="map-node-halo" cx="${x}" cy="${y}" r="${7 * u}" fill="${c}" opacity="0.20"/>
         <circle class="map-node-hit" cx="${x}" cy="${y}" r="${11 * u}" fill="transparent"/>
-        <circle class="map-node-dot" cx="${x}" cy="${y}" r="${3.8 * u}" fill="${c}" stroke="#07111f" stroke-width="${1.2 * u}">
+        <circle class="map-node-dot" cx="${x}" cy="${y}" r="${3.8 * u}" fill="${c}" stroke="#15110b" stroke-width="${1.2 * u}">
           <title>${esc(n.label)} ${esc(n.town)} -- ${n.availability} availability, ${pct(n.idle_fraction)} of channels idle, link ${n.quality}</title></circle>
         <text class="node-label" style="font-size:${12 * u}px" x="${lx}" y="${y + 4.2 * u}" text-anchor="${anchor}">${esc(n.town)}</text>
         ${opts.detail ? `<text class="node-label small" style="font-size:${9.5 * u}px" x="${lx}" y="${y + 15 * u}" text-anchor="${anchor}">${esc(n.label)}</text>` : ''}</g>`;
@@ -215,10 +215,10 @@
         aria-label="Zimbabwe spectrum map. Scroll to zoom, drag to pan.">
       <svg class="map-svg" viewBox="${vx.toFixed(1)} ${vy.toFixed(1)} ${vw.toFixed(1)} ${vh.toFixed(1)}" preserveAspectRatio="xMidYMid meet">
         <defs>${grad}<linearGradient id="land" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#15375a"/><stop offset="1" stop-color="#0f2a47"/></linearGradient>
+          <stop offset="0" stop-color="#3e3220"/><stop offset="1" stop-color="#201a10"/></linearGradient>
           <clipPath id="zw"><path d="${outline}"/></clipPath></defs>
         ${grid.join('')}
-        <path d="${outline}" fill="url(#land)" stroke="#2f5b86" stroke-width="${1.1 * u}" stroke-linejoin="round"/>
+        <path d="${outline}" fill="url(#land)" stroke="#6b5330" stroke-width="${1.1 * u}" stroke-linejoin="round"/>
         <g clip-path="url(#zw)">${D.nodes.map((n) => { const [x, y] = proj(n.lon, n.lat);
           return `<circle cx="${x}" cy="${y}" r="60" fill="url(#g-${n.availability})"/>`; }).join('')}</g>
         ${nodes}
@@ -254,13 +254,13 @@
     const axis = [0, 4, 8, 12, 16, 20, 24].map((h) =>
       `<text class="axis-text" x="${left + h * cw}" y="${hgt + 18}" text-anchor="middle">${String(h).padStart(2, '0')}:00</text>`).join('');
     return `<svg class="chart" viewBox="0 0 ${W} ${hgt + 24}" preserveAspectRatio="xMidYMid meet" style="height:calc(100% - 64px)">
-        <rect x="${left - 1}" y="${top - 1}" width="${gw + 1}" height="${rows.length * rowH + 1}" fill="none" stroke="#1b2d4a"/>
+        <rect x="${left - 1}" y="${top - 1}" width="${gw + 1}" height="${rows.length * rowH + 1}" fill="none" stroke="#382d1d"/>
         ${cells}
-        <rect x="${nx - 0.8}" y="${top - 3}" width="${cw + 0.4}" height="${rows.length * rowH + 4}" fill="none" stroke="#eaf0f8" stroke-width="1.1" rx="2"/>
+        <rect x="${nx - 0.8}" y="${top - 3}" width="${cw + 0.4}" height="${rows.length * rowH + 4}" fill="none" stroke="#f1eada" stroke-width="1.1" rx="2"/>
         ${axis}</svg>
       <div class="legend-row"><span><i class="swatch" style="background:${ramp(0.05)}"></i>Idle</span>
         <span><i class="swatch" style="background:${ramp(0.95)}"></i>Occupied</span>
-        <span style="color:var(--ink-3)"><i class="swatch" style="border:1px solid #eaf0f8"></i>Now (${hh(H.now_hour)})</span></div>`;
+        <span style="color:var(--ink-3)"><i class="swatch" style="border:1px solid #f1eada"></i>Now (${hh(H.now_hour)})</span></div>`;
   }
 
   /* ------------------------------------------------ component: ForecastChart (outlook) */
@@ -274,12 +274,12 @@
     const colours = [COL.blue, COL.green];
     let g = '';
     [0, 0.25, 0.5, 0.75, 1].forEach((v) => {
-      g += `<line x1="${L}" y1="${y(v)}" x2="${W - R}" y2="${y(v)}" stroke="#172a47" stroke-width="1"/>
+      g += `<line x1="${L}" y1="${y(v)}" x2="${W - R}" y2="${y(v)}" stroke="#2a2216" stroke-width="1"/>
             <text class="axis-text" x="${L - 7}" y="${y(v) + 4}" text-anchor="end">${v * 100}%</text>`;
     });
     const nowI = O[0].measured.length - 1;
-    g += `<rect x="${x(nowI)}" y="${T}" width="${W - R - x(nowI)}" height="${H - T - B}" fill="rgba(155,123,242,0.05)"/>
-          <line x1="${x(nowI)}" y1="${T}" x2="${x(nowI)}" y2="${H - B}" stroke="#56688a" stroke-dasharray="2 3"/>
+    g += `<rect x="${x(nowI)}" y="${T}" width="${W - R - x(nowI)}" height="${H - T - B}" fill="rgba(156,107,63,0.06)"/>
+          <line x1="${x(nowI)}" y1="${T}" x2="${x(nowI)}" y2="${H - B}" stroke="#6c5e45" stroke-dasharray="2 3"/>
           <text class="axis-text dim" x="${x(nowI) + 5}" y="${T + 11}">NOW</text>`;
     // Each value is one discrete sensing window, so it is drawn as a step that holds for the
     // hour -- the way a spectrum monitor logs occupancy. Joining the points instead produced
@@ -303,7 +303,7 @@
       g += `<path class="s${k}" d="${step(m)}V${H - B}H${m[0][0]}Z" fill="${c}" opacity="0.09"/>
             <path class="s${k}" d="${step(m)}" fill="none" stroke="${c}" stroke-width="2.2" stroke-linejoin="round"/>
             <path class="s${k}" d="${step(e)}" fill="none" stroke="${c}" stroke-width="1.8" stroke-dasharray="4 4" opacity="0.9"/>
-            <circle class="s${k}" cx="${m[m.length - 1][0]}" cy="${m[m.length - 1][1]}" r="3.8" fill="${c}" stroke="#0e1c32" stroke-width="1.6"/>`;
+            <circle class="s${k}" cx="${m[m.length - 1][0]}" cy="${m[m.length - 1][1]}" r="3.8" fill="${c}" stroke="#1f1810" stroke-width="1.6"/>`;
     });
     const labels = O[0].measured.map((p) => p.hour).concat(O[0].expected.map((p) => p.hour));
     labels.forEach((h, i) => {
@@ -362,7 +362,7 @@
   function SpectrumUsage() {
     const u = D.usage, T = u.total;
     const segs = [['Idle', u.idle, COL.green], ['Occupied', u.occupied, COL.blue],
-      ['Reserved/Protected', u.protected, '#8a9bb3']];
+      ['Reserved/Protected', u.protected, '#93856b']];
     if (u.flagged) segs.push(['Flagged (fail-safe)', u.flagged, COL.amber]);
     const R = 60, C = 2 * Math.PI * R;
     let off = 0, arcs = '';
@@ -375,9 +375,9 @@
       off += len;
     });
     return `<div class="usage"><svg viewBox="0 0 158 158" width="158" height="158">
-        <circle cx="79" cy="79" r="${R}" fill="none" stroke="#13243f" stroke-width="18"/>${arcs}
-        <text x="79" y="80" text-anchor="middle" style="font:800 27px var(--font);fill:#eaf0f8">${Math.round((u.idle / T) * 100)}%</text>
-        <text x="79" y="100" text-anchor="middle" style="font:500 11.5px var(--font);fill:#b6c3d6">Channels Idle</text></svg>
+        <circle cx="79" cy="79" r="${R}" fill="none" stroke="#2a2216" stroke-width="18"/>${arcs}
+        <text x="79" y="80" text-anchor="middle" style="font:800 27px var(--font);fill:#f1eada">${Math.round((u.idle / T) * 100)}%</text>
+        <text x="79" y="100" text-anchor="middle" style="font:500 11.5px var(--font);fill:#c7ba9e">Channels Idle</text></svg>
       <div class="usage-legend">${segs.map(([l, n, c]) =>
         `<div><i class="dot" style="background:${c}"></i><span>${l}</span><span class="n">${n} (${Math.round((n / T) * 100)}%)</span></div>`).join('')}</div></div>
       <div class="notice">${icon('info')}<span>All access decisions are subject to POTRAZ rules and can be instantly revoked.</span></div>`;
@@ -401,7 +401,7 @@
     return `<div class="authority">
       <div class="step"><b style="color:var(--violet)">AI PREDICTS</b><small>Fusion model scores each channel</small></div>
       ${icon('arrow', 'arrow')}
-      <div class="step"><b style="color:#7fb0ff">POTRAZ RULES VERIFY</b><small>Every enforced check must pass</small></div>
+      <div class="step"><b style="color:#d9b458">POTRAZ RULES VERIFY</b><small>Every enforced check must pass</small></div>
       ${icon('arrow', 'arrow')}
       <div class="step"><b style="color:var(--green)">POTRAZ RULES DECIDE</b><small>AI cannot override a rule</small></div></div>`;
   }
@@ -451,7 +451,7 @@
           <span class="rssi-thr" style="left:${scale(thr)}%"></span></div>
         <span class="mono">${r.rssi.toFixed(1)} dBm</span><span class="mono dim" style="color:var(--ink-3)">conf ${r.confidence.toFixed(2)}</span></div>`).join('');
     const picker = D.channels.map((x) => `<button class="chan-btn ${x.channel === ch ? 'sel' : ''}" data-ch="${x.channel}">
-        <i style="background:${{ AVAILABLE: COL.green, OCCUPIED: COL.red, PROTECTED: '#8a9bb3', FLAGGED: COL.amber }[x.status]}"></i>${x.channel}</button>`).join('');
+        <i style="background:${{ AVAILABLE: COL.green, OCCUPIED: COL.red, PROTECTED: '#93856b', FLAGGED: COL.amber }[x.status]}"></i>${x.channel}</button>`).join('');
     const n = parseInt(ch.slice(2), 10);
     const neigh = [n + 1, n + 2].map((k) => D.channels.find((x) => x.channel === 'CH' + k)).filter(Boolean);
     return `<div class="chan-picker" style="margin-bottom:14px">${picker}</div>
@@ -568,7 +568,7 @@
       const u = a.hourly_utilisation, W = 560, H = 210, L = 40, B = 24;
       const x = (i) => L + (i / 23) * (W - L - 10), y = (v) => 8 + (1 - v / 100) * (H - 8 - B);
       const line = u.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join('');
-      const grid = [0, 25, 50, 75, 100].map((v) => `<line x1="${L}" y1="${y(v)}" x2="${W - 10}" y2="${y(v)}" stroke="#172a47"/>
+      const grid = [0, 25, 50, 75, 100].map((v) => `<line x1="${L}" y1="${y(v)}" x2="${W - 10}" y2="${y(v)}" stroke="#2a2216"/>
         <text class="axis-text" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}%</text>`).join('');
       const xl = [0, 4, 8, 12, 16, 20, 23].map((i) => `<text class="axis-text" x="${x(i)}" y="${H - 6}" text-anchor="middle">${hh(i)}</text>`).join('');
       return `
@@ -576,7 +576,7 @@
       <div class="row-2e">
         ${panel('Fusion Model vs Naive Vote', `<div class="metric-bars">${bars}</div>
           <div class="legend-row" style="justify-content:flex-start;margin-top:16px"><span><i class="swatch" style="background:${COL.violet}"></i>ML fusion</span>
-          <span><i class="swatch" style="background:#4c5f80"></i>Naive vote baseline</span></div>
+          <span><i class="swatch" style="background:#7a6c52"></i>Naive vote baseline</span></div>
           <dl class="kv" style="margin-top:18px"><dt>Model</dt><dd>${esc(D.config.model)}</dd>
           <dt>Latency</dt><dd class="mono">${a.latency_ms} ms / prediction (budget 100 ms)</dd>
           <dt>Evaluation</dt><dd class="mono">${a.train_windows.toLocaleString()} train / ${a.test_windows.toLocaleString()} held-out windows</dd></dl>`,

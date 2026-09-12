@@ -3,7 +3,7 @@
    Colour is semantic: blue = infrastructure, green = available/authorised,
    amber = caution, red = occupied/denied, violet = ML (advisory only). */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 :root {
   --bg:        #07111f;
@@ -34,13 +34,14 @@
   --r:         10px;
   --r-sm:      6px;
   --font:      'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --mono:      'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+  --mono:      'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --shadow:    0 1px 0 rgba(255,255,255,0.02) inset, 0 10px 30px -18px rgba(0,0,0,0.7);
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
-  font-family: var(--font); font-size: 13px; -webkit-font-smoothing: antialiased; }
+  font-family: var(--font); font-size: 13px; -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums; }
 body { overflow: hidden; }
 button { font-family: inherit; }
 svg { display: block; }
